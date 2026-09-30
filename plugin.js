@@ -67,7 +67,7 @@ async function getSpanishStreams(sources) {
   let requests = 0;
 
   for (const src of sources) {
-    if (requests >= 8) break; // máximo 8 sources por partido para no agotar el límite de 60/llamada
+    if (requests >= 16) break; // máximo 8 sources por partido para no agotar el límite de 60/llamada
     requests++;
     let entries;
     try {
@@ -250,7 +250,7 @@ export async function liveChannels({ categoryId, cursor }) {
   // Para no agotar las 60 peticiones/llamada, limitamos a los primeros 15 partidos
   // con un máximo de 2 sources por partido.
   const items = [];
-  let fetchCount = 1; // getSports() ya usó 1, matches usó 1 → ya tenemos 2
+  let fetchCount = 10; // getSports() ya usó 1, matches usó 1 → ya tenemos 2
 
   for (const match of page) {
     if (!match.sources?.length) continue;

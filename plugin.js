@@ -258,9 +258,9 @@ export async function liveChannels({ categoryId, cursor }) {
     const channelBase = matchToChannel(match, categoryId);
     let ref = null;
 
-    // Intentar encontrar streams en español (máximo 2 sources por partido, y máximo 50 fetch totales)
+    // Intentar encontrar streams en español (máximo 10 sources por partido, y máximo 50 fetch totales)
     if (fetchCount < 50) {
-      const sourcesToCheck = (match.sources || []).slice(0, 2);
+      const sourcesToCheck = (match.sources || []).slice(0, 10);
       for (const src of sourcesToCheck) {
         if (fetchCount >= 50) break;
         fetchCount++;

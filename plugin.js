@@ -5,14 +5,6 @@
 
 const API = "https://streamed.pk/api";
 
-// ── Idiomas que se consideran "español" ───────────────────────────────────
-const ES_LANGS = ["spanish", "español", "espanol", "es", "spa", "castellano"];
-
-function isSpanish(lang) {
-  if (!lang) return false;
-  return ES_LANGS.some((s) => lang.toLowerCase().includes(s));
-}
-
 // ── Slugify: convierte un string cualquiera a un id válido para Kino ──────
 // id pattern: ^[A-Za-z0-9._~-]{1,128}$
 function slugify(str) {

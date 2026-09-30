@@ -1,52 +1,17 @@
-# Internet Archive plugin for Kino
+# TPSports31 plugin for Kino
 
-A plugin for the Kino video app that brings the public-domain films and classic TV of
-[archive.org](https://archive.org) into Kino's search, Home and player. It is the reference example
+A plugin for the Kino video app that brings the live events and TV channels of
+[streamed.pk](https://streamed.pk) into Kino's search, Home and player. It is the reference example
 for plugin authors: one manifest, one JavaScript file, no build step.
 
 ## What it does
 
-| Capability | How |
-| --- | --- |
-| `search` | Titles in both the `feature_films` (movies) and `classic_tv` (series) collections, most downloaded first, up to 25 from each; an item in both is listed once. The `type` Kino sends is only an ordering preference (the collection that matches it comes first), never a filter, because TMDB's movie/tv split does not line up with archive.org's: public-domain films and classic TV are mixed, and a title can exist as both. Characters and words that are query syntax to archive.org (`/`, `-`, `&`, `AND`, `OR`, `NOT`) are cleaned out of what the person typed. |
-| `home` | Three rows: public-domain films, classic TV and classic animation, by downloads, 30 titles each, after the person's own rows if they set addresses (see below). Each row carries a `ref`, so Kino ends it with a "Ver más" card. |
-| `browse` | "Ver más" on a Home row: the same query as the row, 50 titles per page, the page number as the cursor (`"2"`, `"3"`, …). |
-| `episodes` | The video files of an item, in natural order. Files named `S01E02` get that season and number; otherwise they are numbered 1, 2, 3 in order. |
-| `resolve` | The file to play: the item's own mp4/m4v/webm, or the best mp4 archive.org derived from the original (`.avi`, `.mpg`, `.mkv`, `.divx`...). Sibling `.vtt`/`.srt` files become subtitles. |
-
-Two things it does not try to be clever about, so do not copy them as intended behavior:
-an item found inside a collection or in the built-in rows that bundles several films is exposed as
-a single `movie`, and `resolve` plays its first video in natural name order (put its own address in
-Configurar to get one card per video); and episodes numbered `S01E00` (a pilot, a special)
-are dropped by Kino, whose episode numbers start at 1.
+Get the streams from 'streamed.pk' and add them to Kino, allowing you to enjoy live sporting events
 
 ## Your own addresses (Configurar)
 
-Under Ajustes > Plugins > Internet Archive > Configurar the person can add up to thirty archive.org
+Under Ajustes > Plugins > TPSports31 > Configurar the person can add up to thirty streamed.pk
 addresses with the "Agregar" button (a dialog with Dirección and an optional Categoría); each one is then listed as a text line with an "Editar" button:
-
-| Address | What it lists |
-| --- | --- |
-| `https://archive.org/details/<collection>` | the videos of that collection |
-| `https://archive.org/details/<item>` | that item (one with no collection filed under it): a single video is one card; an item with several videos is one card per video (`<item>~1`, `<item>~2`, ...), each playing its own file, and a search also looks at their titles |
-| `https://archive.org/search?query=...` | the videos a search returns (movies only) |
-
-Each address becomes a Home row of its own, before the three built-in ones, newest additions first
-(`addeddate desc`), with the same "Ver más" paging. Addresses that share a category name (capitals
-do not matter; the row keeps the first spelling) are merged into one row for that name, asked of
-archive.org as a single `OR` query. A category with no valid address behind it makes no row. What is
-inside the addresses is also searched, and comes first in Kino's search results. Anything that is not
-archive.org, or not one of the three forms above, is ignored: the plugin only ever talks to
-archive.org. With no addresses the plugin behaves exactly as before.
-
-This is one `list` setting (`sources`, apiVersion 4), so it needs a Kino version that supports list settings.
-
-## Hosts, and why `*.archive.org`
-
-The manifest declares `archive.org` and `*.archive.org`, and the plugin can only talk to those.
-`https://archive.org/download/...` answers with a redirect to a storage node such as
-`dn720705.ca.archive.org`, and a wildcard does not cover its own bare domain (`*.archive.org` does
-not match `archive.org`), so both are listed. Kino shows the list to the person before installing.
 
 ## Install it in Kino
 
@@ -87,5 +52,5 @@ The code in this repository is licensed under the [Apache License 2.0](LICENSE).
 
 ## License note
 
-What this plugin plays is not ours to license: the videos are public domain or carry the license
-their uploader chose on archive.org. Check an item's page before you reuse or redistribute it.
+What this plugin plays is not ours to license: the streams can be found publicly
+their uploader chose on streamed.pk. Check an item's page before you reuse or redistribute it.

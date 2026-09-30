@@ -1,14 +1,21 @@
 {
   "id": "streamed-sports31",
   "name": "StreamedSports31",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "apiVersion": 3,
   "entry": "plugin.js",
   "description": "Eventos deportivos en vivo con streams en español, vía streamed.pk",
   "author": "",
   "homepage": "https://github.com/tu-usuario/streamed-sports31",
-  "hosts": ["streamed.pk"],
-  "capabilities": ["home", "resolve", "channels"],
+  "hosts": [
+    "streamed.pk",
+    "embed.st"
+  ],
+  "capabilities": [
+    "home",
+    "resolve",
+    "channels"
+  ],
   "liveStreamHosts": "any",
   "color": "#E8333A",
   "icon": "icon.png"

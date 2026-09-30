@@ -55,94 +55,122 @@ async function getSports() {
   return sports;
 }
 
-// ── Obtener streams en español para un partido ────────────────────────────
-// La API da: match.sources = [{ source, id }]
-// Luego: GET /api/stream/<source>/<id> → [{ id, streamNo, language, hd, embedUrl, source }]
-// El embedUrl es una página HTML, no HLS directo. Para obtener el HLS real
-// intentamos con el patrón de la API alternativa que expone el m3u8 directamente.
-async function getSpanishStreams(sources) {
+// ── Hosts de embed que usan WASM/token y no podemos resolver ────────────
+const BLOCKED_EMBEDS = ["embed.st"];
+
+function isBlockedEmbed(url) {
+  if (!url) return true;
+  return BLOCKED_EMBEDS.some((h) => url.includes(h));
+}
+
+// ── Buscar el mejor stream entre todas las sources de un partido ──────────
+// Orden de preferencia: español sin WASM > cualquier idioma sin WASM > español con WASM > cualquier cosa
+// Devuelve { source, streamId, streamNo, embedUrl } o null si no hay nada.
+async function bestStream(sources, fetchCounter) {
   await null;
-  const streams = [];
-  let requests = 0;
+  let esGood = null;   // español + sin WASM
+  let anyGood = null;  // cualquier idioma + sin WASM
+  let esBad = null;    // español + WASM (último recurso)
 
   for (const src of sources) {
-    if (requests >= 8) break; // máximo 8 sources por partido para no agotar el límite de 60/llamada
-    requests++;
+    if (fetchCounter.n >= 50) break;
+    fetchCounter.n++;
     let entries;
     try {
       entries = await apiGet("/stream/" + encodeURIComponent(src.source) + "/" + encodeURIComponent(src.id));
     } catch {
-      continue; // si un source falla, intentamos el siguiente
+      continue;
     }
-    if (!Array.isArray(entries)) continue;
+    if (!Array.isArray(entries) || !entries.length) continue;
+
     for (const s of entries) {
-      if (isSpanish(s.language)) {
-        streams.push({ ...s, sourceName: src.source });
-      }
+      const blocked = isBlockedEmbed(s.embedUrl);
+      const es = isSpanish(s.language);
+      const candidate = { source: src.source, streamId: src.id, streamNo: s.streamNo || 1, embedUrl: s.embedUrl };
+
+      if (es && !blocked && !esGood) esGood = candidate;
+      if (!blocked && !anyGood) anyGood = candidate;
+      if (es && blocked && !esBad) esBad = candidate;
     }
+
+    // Si ya tenemos la mejor opción posible, parar
+    if (esGood) break;
   }
-  return streams;
+
+  return esGood || anyGood || esBad || null;
 }
 
-// ── Construir URL de stream HLS a partir del embedUrl ────────────────────
-// streamed.pk devuelve un embedUrl tipo:
-//   https://embedme.top/embed/alpha/mu-liv-123/1
-// El endpoint de stream directo suele ser:
-//   https://rr.vipstreams.in/alpha/js/mu-liv-123/1/index.m3u8  (varía por source)
-// Como no podemos saber el CDN de antemano y liveStreamHosts:"any" lo cubre,
-// tomamos el embedUrl tal cual para el ref y en resolve intentamos el m3u8.
-// Si el embedUrl ya es .m3u8 lo usamos directo.
+// ── Construir ref estable para Kino ──────────────────────────────────────
 
-function buildStreamRef(matchId, sourceEntry) {
+function buildStreamRef(matchId, best) {
   // ref = "live|<matchId>|<source>|<streamId>|<streamNo>"
-  // Todos los campos estables; el URL fresco se obtiene en resolve()
-  return [
-    "live",
-    matchId,
-    sourceEntry.sourceName || sourceEntry.source,
-    sourceEntry.id,
-    String(sourceEntry.streamNo || 1),
-  ].join("|");
+  return ["live", matchId, best.source, best.streamId, String(best.streamNo)].join("|");
 }
 
 // ── resolve: obtener el stream real en el momento de reproducir ───────────
 // ref = "live|<matchId>|<source>|<streamId>|<streamNo>"
+// En resolve volvemos a buscar entre TODAS las sources del partido para
+// conseguir la URL más fresca y evitar los embeds con WASM.
 export async function resolve(ref) {
   await null; // primer await obligatorio antes de cualquier throw
   const parts = String(ref).split("|");
   if (parts.length < 5 || parts[0] !== "live") {
     throw kino.error("not_found", "ref de canal desconocida");
   }
-  const [, matchId, source, streamId, streamNoStr] = parts;
-  const streamNo = parseInt(streamNoStr, 10) || 1;
+  const [, matchId, source, streamId] = parts;
 
-  // Buscar de nuevo los streams para obtener la URL fresca
+  // Primero intentamos la source que ya conocemos (más rápido)
   let entries;
   try {
     entries = await apiGet("/stream/" + encodeURIComponent(source) + "/" + encodeURIComponent(streamId));
-  } catch (e) {
-    throw kino.error("unavailable", "no se pudo obtener el stream: " + (e.message || ""));
-  }
-  if (!Array.isArray(entries) || !entries.length) {
-    throw kino.error("not_found", "el partido ya no tiene streams");
+  } catch {
+    entries = [];
   }
 
-  // Preferir el que coincide por streamNo y sea español; si no, el primero español
-  const esStreams = entries.filter((s) => isSpanish(s.language));
-  const target =
-    esStreams.find((s) => s.streamNo === streamNo) ||
-    esStreams[0] ||
-    entries[0];
+  // Buscar un stream sin WASM entre los resultados de esta source
+  let target = null;
+  if (Array.isArray(entries)) {
+    const esGood = entries.find((s) => isSpanish(s.language) && !isBlockedEmbed(s.embedUrl));
+    const anyGood = entries.find((s) => !isBlockedEmbed(s.embedUrl));
+    const esAny = entries.find((s) => isSpanish(s.language));
+    target = esGood || anyGood || esAny || entries[0] || null;
+  }
+
+  // Si el resultado tiene WASM o no hay resultado, intentar con las otras sources del partido
+  if (!target || isBlockedEmbed(target.embedUrl)) {
+    // Obtener la lista completa de sources del partido desde los matches en vivo
+    let allSources = [{ source, id: streamId }];
+    try {
+      const live = await apiGet("/matches/live");
+      if (Array.isArray(live)) {
+        const match = live.find((m) => m.id === matchId || m.sources?.some((s) => s.id === streamId));
+        if (match?.sources?.length) allSources = match.sources;
+      }
+    } catch { /* seguimos con lo que tenemos */ }
+
+    // Probar cada source que no hayamos probado ya
+    const fc = { n: 1 }; // ya usamos 1 fetch arriba
+    const best = await bestStream(
+      allSources.filter((s) => !(s.source === source && s.id === streamId)),
+      fc
+    );
+    if (best && !isBlockedEmbed(best.embedUrl)) {
+      return {
+        url: resolveHlsUrl(best.embedUrl, best.source, best.streamId, best.streamNo),
+        mime: "application/vnd.apple.mpegurl",
+        expiresInSeconds: 300,
+      };
+    }
+    // Si todo tiene WASM, usar el target original de todos modos (puede funcionar en algunos clientes)
+    if (!target) throw kino.error("not_found", "el partido ya no tiene streams disponibles");
+  }
 
   if (!target?.embedUrl) throw kino.error("not_found", "embedUrl no disponible");
 
-  // Intentar transformar embedUrl a un HLS m3u8 directo
-  const url = resolveHlsUrl(target.embedUrl, source, streamId, streamNo);
-
+  const url = resolveHlsUrl(target.embedUrl, source, streamId, parseInt(parts[4], 10) || 1);
   return {
     url,
     mime: "application/vnd.apple.mpegurl",
-    // El token del embed expira; pedimos re-resolve tras 5 minutos
     expiresInSeconds: 300,
   };
 }
@@ -158,24 +186,28 @@ function resolveHlsUrl(embedUrl, source, streamId, streamNo) {
   // Si ya es m3u8, lo usamos tal cual
   if (embedUrl.includes(".m3u8")) return embedUrl;
 
-  // Patrón embedme.top
-  // https://embedme.top/embed/alpha/STREAMID/1
+  // Patrón embed.st  →  https://embed.st/embed/<source>/<id>/<streamNo>
+  const embedSt = embedUrl.match(/embed\.st\/embed\/([^/]+)\/([^/]+)\/(\d+)/);
+  if (embedSt) {
+    const [, src, sid, sno] = embedSt;
+    return `https://embed.st/hls/${src}/${sid}/${sno}/index.m3u8`;
+  }
+
+  // Patrón embedme.top  →  https://embedme.top/embed/<source>/<id>/<streamNo>
   const embedme = embedUrl.match(/embedme\.top\/embed\/([^/]+)\/([^/]+)\/(\d+)/);
   if (embedme) {
     const [, src, sid, sno] = embedme;
     return `https://rr.vipstreams.in/${src}/js/${sid}/${sno}/index.m3u8`;
   }
 
-  // Patrón streamed.su/embed
-  // https://streamed.su/embed/alpha/STREAMID/1
+  // Patrón streamed.su/embed  →  https://streamed.su/embed/<source>/<id>/<streamNo>
   const streamedSu = embedUrl.match(/streamed\.su\/embed\/([^/]+)\/([^/]+)\/(\d+)/);
   if (streamedSu) {
     const [, src, sid, sno] = streamedSu;
     return `https://streamed.su/hls/${src}/${sid}/${sno}/index.m3u8`;
   }
 
-  // Fallback: devolver embedUrl (puede ser una página que Kino no sepa reproducir,
-  // pero liveStreamHosts:"any" garantiza que no lo bloqueemos por host)
+  // Fallback: devolver embedUrl tal cual
   return embedUrl;
 }
 
@@ -257,42 +289,14 @@ export async function liveChannels({ categoryId, cursor }) {
     const channelBase = matchToChannel(match, categoryId);
     let ref = null;
 
-    // Preferir español; si no hay, usar cualquier idioma disponible
-    if (fetchCount < 50) {
-      const sourcesToCheck = (match.sources || []).slice(0, 2);
-      let bestFallback = null;
+    // Buscar el mejor stream entre todas las sources (español sin WASM > cualquier sin WASM > resto)
+    const fc = { n: fetchCount };
+    const best = await bestStream(match.sources || [], fc);
+    fetchCount = fc.n;
 
-      for (const src of sourcesToCheck) {
-        if (fetchCount >= 50) break;
-        fetchCount++;
-        let entries;
-        try {
-          entries = await apiGet("/stream/" + encodeURIComponent(src.source) + "/" + encodeURIComponent(src.id));
-        } catch {
-          continue;
-        }
-        if (!Array.isArray(entries) || !entries.length) continue;
+    if (!best) continue; // partido sin ningún stream accesible
 
-        const esStream = entries.find((s) => isSpanish(s.language));
-        if (esStream) {
-          ref = buildStreamRef(channelBase.id, { ...esStream, sourceName: src.source, id: src.id });
-          break;
-        }
-        if (!bestFallback) {
-          bestFallback = buildStreamRef(channelBase.id, { ...entries[0], sourceName: src.source, id: src.id });
-        }
-      }
-
-      if (!ref && bestFallback) ref = bestFallback;
-    }
-
-    // Si no se pudo consultar ningún source, construir ref directo con la primera source
-    if (!ref && match.sources?.length) {
-      const src = match.sources[0];
-      ref = ["live", channelBase.id, src.source, src.id, "1"].join("|");
-    }
-
-    if (!ref) continue;
+    ref = buildStreamRef(channelBase.id, best);
 
     items.push({ ...channelBase, ref });
   }

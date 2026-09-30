@@ -157,7 +157,7 @@ export async function resolve(ref) {
     if (best && !isBlockedEmbed(best.embedUrl)) {
       return {
         url: resolveHlsUrl(best.embedUrl, best.source, best.streamId, best.streamNo),
-        mime: "application/vnd.apple.mpegurl",
+        mime: "text/html",
         expiresInSeconds: 300,
       };
     }
@@ -170,45 +170,16 @@ export async function resolve(ref) {
   const url = resolveHlsUrl(target.embedUrl, source, streamId, parseInt(parts[4], 10) || 1);
   return {
     url,
-    mime: "application/vnd.apple.mpegurl",
+    mime: "text/html",
     expiresInSeconds: 300,
   };
 }
 
-// Transforma el embedUrl a una URL HLS directa.
-// streamed.pk usa distintos reproductores por source. Patrones conocidos:
-//   embedme.top/embed/<source>/<id>/<n>  →  rr.vipstreams.in/<source>/js/<id>/<n>/index.m3u8
-//   (cuando no reconocemos el patrón, devolvemos el embedUrl tal cual —
-//    Kino intentará reproducirlo; si es una página HTML fallará, pero con
-//    liveStreamHosts:"any" al menos no hay restricción de host)
-function resolveHlsUrl(embedUrl, source, streamId, streamNo) {
-  if (!embedUrl) return "";
-  // Si ya es m3u8, lo usamos tal cual
-  if (embedUrl.includes(".m3u8")) return embedUrl;
-
-  // Patrón embed.st  →  https://embed.st/embed/<source>/<id>/<streamNo>
-  const embedSt = embedUrl.match(/embed\.st\/embed\/([^/]+)\/([^/]+)\/(\d+)/);
-  if (embedSt) {
-    const [, src, sid, sno] = embedSt;
-    return `https://embed.st/hls/${src}/${sid}/${sno}/index.m3u8`;
-  }
-
-  // Patrón embedme.top  →  https://embedme.top/embed/<source>/<id>/<streamNo>
-  const embedme = embedUrl.match(/embedme\.top\/embed\/([^/]+)\/([^/]+)\/(\d+)/);
-  if (embedme) {
-    const [, src, sid, sno] = embedme;
-    return `https://rr.vipstreams.in/${src}/js/${sid}/${sno}/index.m3u8`;
-  }
-
-  // Patrón streamed.su/embed  →  https://streamed.su/embed/<source>/<id>/<streamNo>
-  const streamedSu = embedUrl.match(/streamed\.su\/embed\/([^/]+)\/([^/]+)\/(\d+)/);
-  if (streamedSu) {
-    const [, src, sid, sno] = streamedSu;
-    return `https://streamed.su/hls/${src}/${sid}/${sno}/index.m3u8`;
-  }
-
-  // Fallback: devolver embedUrl tal cual
-  return embedUrl;
+// Devuelve el embedUrl tal cual para que Kino lo abra en WebView.
+// embed.st genera el token HLS vía WASM en el navegador, no podemos resolverlo
+// desde el plugin, así que dejamos que Kino cargue la página del reproductor.
+function resolveHlsUrl(embedUrl) {
+  return embedUrl || "";
 }
 
 // ── Mapear un partido de la API a un LiveChannel de Kino ─────────────────

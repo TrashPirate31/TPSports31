@@ -6,13 +6,12 @@
 const API = "https://streamed.pk/api";
 
 // ── Idiomas que se consideran "español" ───────────────────────────────────
-const ES_LANGS = ["spanish", "español", "espanol", "es", "spa", "en", "english", "ingles", "inglés", "eng", "castellano"];
+const ES_LANGS = ["spanish", "español", "espanol", "es", "spa", "castellano"];
 
 function isSpanish(lang) {
   if (!lang) return false;
   return ES_LANGS.some((s) => lang.toLowerCase().includes(s));
 }
-
 
 // ── Slugify: convierte un string cualquiera a un id válido para Kino ──────
 // id pattern: ^[A-Za-z0-9._~-]{1,128}$
@@ -67,7 +66,7 @@ async function getSpanishStreams(sources) {
   let requests = 0;
 
   for (const src of sources) {
-    if (requests >= 16) break; // máximo 8 sources por partido para no agotar el límite de 60/llamada
+    if (requests >= 8) break; // máximo 8 sources por partido para no agotar el límite de 60/llamada
     requests++;
     let entries;
     try {
@@ -250,7 +249,7 @@ export async function liveChannels({ categoryId, cursor }) {
   // Para no agotar las 60 peticiones/llamada, limitamos a los primeros 15 partidos
   // con un máximo de 2 sources por partido.
   const items = [];
-  let fetchCount = 10; // getSports() ya usó 1, matches usó 1 → ya tenemos 2
+  let fetchCount = 1; // getSports() ya usó 1, matches usó 1 → ya tenemos 2
 
   for (const match of page) {
     if (!match.sources?.length) continue;
@@ -258,9 +257,11 @@ export async function liveChannels({ categoryId, cursor }) {
     const channelBase = matchToChannel(match, categoryId);
     let ref = null;
 
-    // Intentar encontrar streams en español (máximo 10 sources por partido, y máximo 50 fetch totales)
+    // Preferir español; si no hay, usar cualquier idioma disponible
     if (fetchCount < 50) {
-      const sourcesToCheck = (match.sources || []).slice(0, 10);
+      const sourcesToCheck = (match.sources || []).slice(0, 2);
+      let bestFallback = null;
+
       for (const src of sourcesToCheck) {
         if (fetchCount >= 50) break;
         fetchCount++;
@@ -270,20 +271,28 @@ export async function liveChannels({ categoryId, cursor }) {
         } catch {
           continue;
         }
-        if (!Array.isArray(entries)) continue;
+        if (!Array.isArray(entries) || !entries.length) continue;
+
         const esStream = entries.find((s) => isSpanish(s.language));
         if (esStream) {
-          ref = buildStreamRef(channelBase.id, {
-            ...esStream,
-            sourceName: src.source,
-            id: src.id,
-          });
+          ref = buildStreamRef(channelBase.id, { ...esStream, sourceName: src.source, id: src.id });
           break;
         }
+        if (!bestFallback) {
+          bestFallback = buildStreamRef(channelBase.id, { ...entries[0], sourceName: src.source, id: src.id });
+        }
       }
+
+      if (!ref && bestFallback) ref = bestFallback;
     }
 
-    if (!ref) continue; // solo incluir canales con stream en español
+    // Si no se pudo consultar ningún source, construir ref directo con la primera source
+    if (!ref && match.sources?.length) {
+      const src = match.sources[0];
+      ref = ["live", channelBase.id, src.source, src.id, "1"].join("|");
+    }
+
+    if (!ref) continue;
 
     items.push({ ...channelBase, ref });
   }

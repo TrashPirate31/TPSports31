@@ -1,204 +1,28 @@
 /// <reference path="./sdk/kino.d.ts" />
-// StreamedIPTV31
-// Schedule: streamed.pk (eventos del día, partidos en vivo)
-// Streams:  iptv-org.github.io (m3u8 directos, sin token, sin WASM)
-//
-// Lógica de emparejamiento:
-//   streamed.pk  →  source:"admin", id:"ppv-nfl-network"
-//   IPTV-org     →  channel_id:"NFLNetwork.us", url: "https://..."
-//   Se empareja por similitud de nombre (fuzzy match).
+// StreamedSports31 v2.1.0
+// Schedule : livesoccertv.com (México /mx/ + USA en español /us-es/)
+// Streams  : iptv-org.github.io (m3u8 directos, sin token)
+// Canales  : cuando un partido tiene varios, el usuario elige cuál ver
 
-const STREAMED_API = "https://streamed.pk/api";
-const IPTV_SPORTS_M3U = "https://iptv-org.github.io/iptv/categories/sports.m3u";
-const IPTV_STREAMS_JSON = "https://iptv-org.github.io/api/streams.json";
+const LSTV_MX  = "https://www.livesoccertv.com/mx/schedules/";   // México
+const LSTV_US  = "https://www.livesoccertv.com/us-es/schedules/"; // USA en español
+const IPTV_M3U = "https://iptv-org.github.io/iptv/categories/sports.m3u";
 
-// ── Cachés en memoria (duran lo que dure la sesión del sandbox) ───────────
-let iptvIndex = null;      // Map<nombreNormalizado, { url, channel_id }>
-const IPTV_TTL = 6 * 60 * 60 * 1000; // 6 horas en storage
-const IPTV_KEY = "iptv-sports-index";
-const SPORTS_KEY = "sports-list";
-const SPORTS_TTL = 12 * 60 * 60 * 1000;
+const IPTV_KEY   = "iptv-index-v2";
+const IPTV_TTL   = 6 * 60 * 60 * 1000;   // 6 h
+const SCHED_TTL  = 30 * 60 * 1000;        // 30 min
 
-// ── Normalizar texto para comparación fuzzy ───────────────────────────────
-function norm(s) {
-  return String(s || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]/g, "");
+// ── Utilidades ─────────────────────────────────────────────────────────────
+
+function todayStr() {
+  // YYYY-MM-DD en UTC (livesoccertv usa UTC para las rutas)
+  const d = new Date();
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-// Extrae palabras significativas (>2 chars)
-function words(s) {
-  return norm(s).split("").reduce((acc, c, i, arr) => {
-    // reconstruir palabras del string normalizado
-    return acc;
-  }, norm(s).match(/[a-z0-9]{2,}/g) || []);
-}
-
-// Puntuación de similitud entre dos strings normalizados
-function similarity(a, b) {
-  const wa = new Set(words(a));
-  const wb = new Set(words(b));
-  if (!wa.size || !wb.size) return 0;
-  let common = 0;
-  for (const w of wa) if (wb.has(w)) common++;
-  return common / Math.max(wa.size, wb.size);
-}
-
-// ── Parsear M3U de IPTV-org ───────────────────────────────────────────────
-// Formato:
-//   #EXTINF:-1 tvg-id="NFLNetwork.us" tvg-name="NFL Network" ...,NFL Network
-//   https://...index.m3u8
-function parseM3U(text) {
-  const lines = text.split("\n");
-  const channels = [];
-  let meta = null;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (line.startsWith("#EXTINF:")) {
-      // extraer tvg-id y tvg-name
-      const idMatch = line.match(/tvg-id="([^"]+)"/);
-      const nameMatch = line.match(/tvg-name="([^"]+)"/);
-      const commaIdx = line.lastIndexOf(",");
-      const displayName = commaIdx >= 0 ? line.slice(commaIdx + 1).trim() : "";
-      meta = {
-        channel_id: idMatch?.[1] || "",
-        name: nameMatch?.[1] || displayName,
-      };
-    } else if (line.startsWith("http") && meta) {
-      channels.push({ ...meta, url: line });
-      meta = null;
-    } else if (!line.startsWith("#")) {
-      meta = null;
-    }
-  }
-  return channels;
-}
-
-// ── Construir índice IPTV (nombre normalizado → stream) ───────────────────
-async function getIptvIndex() {
-  await null;
-
-  // 1. Memoria
-  if (iptvIndex) return iptvIndex;
-
-  // 2. Storage
-  const cached = kino.storage.get(IPTV_KEY);
-  if (cached) {
-    try {
-      iptvIndex = new Map(JSON.parse(cached));
-      return iptvIndex;
-    } catch { /* corrupto, re-fetch */ }
-  }
-
-  // 3. Fetch M3U deportes
-  let m3uText;
-  try {
-    const r = await kino.fetch(IPTV_SPORTS_M3U);
-    if (!r.ok) throw kino.error("unavailable", "IPTV-org respondió " + r.status);
-    m3uText = r.text();
-  } catch (e) {
-    if (e.kinoCode) throw e;
-    throw kino.error("unavailable", "no se pudo obtener la lista de canales IPTV");
-  }
-
-  const channels = parseM3U(m3uText);
-  kino.log("IPTV-org sports: " + channels.length + " canales cargados");
-
-  // Construir índice: nombre normalizado → mejor URL (https primero)
-  // Guardamos también channel_id para deduplicar
-  const tempMap = new Map(); // channel_id → { name, url }
-  for (const ch of channels) {
-    if (!ch.url || !ch.name) continue;
-    const existing = tempMap.get(ch.channel_id);
-    // Preferir https sobre http
-    if (!existing || (!existing.url.startsWith("https") && ch.url.startsWith("https"))) {
-      tempMap.set(ch.channel_id, { name: ch.name, url: ch.url, channel_id: ch.channel_id });
-    }
-  }
-
-  // Índice por nombre normalizado (puede haber varios nombres para un canal)
-  iptvIndex = new Map();
-  for (const [, ch] of tempMap) {
-    const key = norm(ch.name);
-    if (key && !iptvIndex.has(key)) {
-      iptvIndex.set(key, { url: ch.url, channel_id: ch.channel_id, name: ch.name });
-    }
-  }
-
-  // Guardar en storage (serializar como array de pares)
-  try {
-    const serialized = JSON.stringify([...iptvIndex]);
-    if (serialized.length < 250000) { // respetar límite 256 KB
-      kino.storage.set(IPTV_KEY, serialized, { ttlMs: IPTV_TTL });
-    }
-  } catch { /* ignorar error de storage */ }
-
-  return iptvIndex;
-}
-
-// ── Buscar el mejor stream IPTV para un nombre de canal ───────────────────
-function findIptvStream(index, channelName) {
-  if (!channelName || !index.size) return null;
-  const normName = norm(channelName);
-
-  // Coincidencia exacta primero
-  if (index.has(normName)) return index.get(normName);
-
-  // Fuzzy: buscar el que tenga mayor similitud
-  let best = null;
-  let bestScore = 0;
-  for (const [key, val] of index) {
-    const score = similarity(normName, key);
-    if (score > bestScore && score >= 0.5) {
-      bestScore = score;
-      best = val;
-    }
-  }
-  return best;
-}
-
-// ── Extraer nombre de canal del id de streamed.pk ─────────────────────────
-// Ejemplos:
-//   "ppv-nfl-network"        → "NFL Network"
-//   "admin-tennis-channel"   → "Tennis Channel"
-//   "ppv-sky-sports-golf"    → "Sky Sports Golf"
-//   "ppv-fox-cricket"        → "Fox Cricket"
-function channelNameFromId(id) {
-  return String(id || "")
-    .replace(/^ppv-|^admin-/, "")
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-// ── Fetch helper ──────────────────────────────────────────────────────────
-async function apiGet(path) {
-  let r;
-  try {
-    r = await kino.fetch(STREAMED_API + path);
-  } catch (e) {
-    if (e.code === "timeout") throw kino.error("unavailable", "streamed.pk tardó demasiado");
-    throw kino.error("unavailable", "sin conexión con streamed.pk");
-  }
-  if (r.status === 429) throw kino.error("rate_limited");
-  if (r.status === 451) throw kino.error("geo_blocked");
-  if (!r.ok) throw kino.error("unavailable", "streamed.pk " + r.status);
-  return r.json();
-}
-
-// ── Obtener deportes (cacheados) ──────────────────────────────────────────
-async function getSports() {
-  await null;
-  const cached = kino.storage.get(SPORTS_KEY);
-  if (cached) return JSON.parse(cached);
-  const sports = await apiGet("/sports");
-  if (!Array.isArray(sports)) throw kino.error("unavailable", "sin deportes");
-  kino.storage.set(SPORTS_KEY, JSON.stringify(sports), { ttlMs: SPORTS_TTL });
-  return sports;
-}
-
-// ── Slugify para IDs de Kino ──────────────────────────────────────────────
 function slugify(s) {
   return String(s || "")
     .toLowerCase()
@@ -208,248 +32,434 @@ function slugify(s) {
     .slice(0, 128) || "item";
 }
 
-// ── Construir ref estable ─────────────────────────────────────────────────
-// ref = "live|<matchId>|<channelName urlencoded>"
-// En resolve() buscamos el stream IPTV por channelName en ese momento
-function buildRef(matchId, channelName) {
-  return "live|" + matchId + "|" + encodeURIComponent(channelName);
+function norm(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
 }
 
-// ── Convertir partido + canal IPTV a LiveChannel de Kino ─────────────────
-function matchToChannel(match, categoryId, iptvStream) {
-  const rawId = String(match.id || "");
-  const id = /^[A-Za-z0-9._~-]{1,128}$/.test(rawId) ? rawId : slugify(rawId);
-  const home = match.teams?.home?.name;
-  const away = match.teams?.away?.name;
-  const title = home && away ? `${home} vs ${away}` : (match.title || "Partido en vivo");
-  let logo;
-  const badge = match.teams?.home?.badge;
-  if (badge) logo = `https://streamed.pk/api/images/badge/${encodeURIComponent(badge)}.webp`;
-
-  return {
-    id,
-    title: title.slice(0, 200),
-    categoryId,
-    ref: buildRef(id, iptvStream.name),
-    logo,
-    stream: undefined,
-  };
+function wordSet(s) {
+  return new Set((norm(s).match(/[a-z0-9]{2,}/g) || []));
 }
 
-// ── liveCategories ────────────────────────────────────────────────────────
-export async function liveCategories() {
-  const sports = await getSports();
-  const cats = [];
-  const seen = new Set();
-  for (const s of sports.slice(0, 200)) {
-    const id = slugify(s.id || s.name || "");
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    cats.push({ id, title: String(s.name || s.id).slice(0, 200) });
+function similarity(a, b) {
+  const wa = wordSet(a);
+  const wb = wordSet(b);
+  if (!wa.size || !wb.size) return 0;
+  let common = 0;
+  for (const w of wa) if (wb.has(w)) common++;
+  return common / Math.max(wa.size, wb.size);
+}
+
+// ── Parsear M3U ────────────────────────────────────────────────────────────
+
+function parseM3U(text) {
+  const lines = text.split("\n");
+  const out = [];
+  let meta = null;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line.startsWith("#EXTINF:")) {
+      const idM    = line.match(/tvg-id="([^"]+)"/);
+      const nameM  = line.match(/tvg-name="([^"]+)"/);
+      const comma  = line.lastIndexOf(",");
+      meta = {
+        channel_id: idM?.[1] || "",
+        name: nameM?.[1] || (comma >= 0 ? line.slice(comma + 1).trim() : ""),
+      };
+    } else if (line.startsWith("http") && meta) {
+      if (meta.name) out.push({ ...meta, url: line });
+      meta = null;
+    } else if (!line.startsWith("#")) {
+      meta = null;
+    }
   }
-  return cats;
+  return out;
 }
 
-// ── liveChannels ──────────────────────────────────────────────────────────
-export async function liveChannels({ categoryId, cursor }) {
+// ── Índice IPTV ────────────────────────────────────────────────────────────
+// Map<normName, { url, name, channel_id }>
+
+let _iptvIndex = null;
+
+async function getIptvIndex() {
   await null;
+  if (_iptvIndex) return _iptvIndex;
 
-  // Cargar índice IPTV y deportes en paralelo
-  const [index, sports] = await Promise.all([getIptvIndex(), getSports()]);
+  const cached = kino.storage.get(IPTV_KEY);
+  if (cached) {
+    try { _iptvIndex = new Map(JSON.parse(cached)); return _iptvIndex; } catch { /* re-fetch */ }
+  }
 
-  const sport = sports.find((s) => slugify(s.id || s.name || "") === categoryId);
-  const sportId = sport?.id || categoryId;
-
-  let matches;
+  let text;
   try {
-    matches = await apiGet("/matches/" + encodeURIComponent(sportId));
-  } catch {
-    return { items: [] };
+    const r = await kino.fetch(IPTV_M3U);
+    if (!r.ok) throw kino.error("unavailable", "IPTV-org " + r.status);
+    text = r.text();
+  } catch (e) {
+    if (e.kinoCode) throw e;
+    throw kino.error("unavailable", "no se pudo cargar la lista IPTV");
   }
-  if (!Array.isArray(matches) || !matches.length) return { items: [] };
 
-  // Paginación
-  const PAGE = 40;
-  const start = cursor ? parseInt(cursor, 10) : 0;
-  const page = matches.slice(start, start + PAGE);
-  const next = start + PAGE < matches.length ? String(start + PAGE) : undefined;
+  const channels = parseM3U(text);
+  kino.log("IPTV sports:", channels.length, "entradas");
 
+  // Un canal puede tener varios streams; preferir https
+  const byId = new Map();
+  for (const ch of channels) {
+    if (!ch.url || !ch.name) continue;
+    const ex = byId.get(ch.channel_id);
+    if (!ex || (!ex.url.startsWith("https") && ch.url.startsWith("https"))) {
+      byId.set(ch.channel_id, ch);
+    }
+  }
+
+  _iptvIndex = new Map();
+  for (const [, ch] of byId) {
+    const key = norm(ch.name);
+    if (key && !_iptvIndex.has(key)) _iptvIndex.set(key, ch);
+  }
+
+  try {
+    const ser = JSON.stringify([..._iptvIndex]);
+    if (ser.length < 250000) kino.storage.set(IPTV_KEY, ser, { ttlMs: IPTV_TTL });
+  } catch { /* ignorar */ }
+
+  return _iptvIndex;
+}
+
+function findIptv(index, name) {
+  if (!name || !index.size) return null;
+  const n = norm(name);
+  if (index.has(n)) return index.get(n);
+  let best = null, bestScore = 0;
+  for (const [key, val] of index) {
+    const s = similarity(n, key);
+    if (s > bestScore && s >= 0.5) { bestScore = s; best = val; }
+  }
+  return best;
+}
+
+// ── Parsear HTML de livesoccertv ───────────────────────────────────────────
+// Devuelve: [{ matchTitle, time, competition, channels: [{ name, slug }] }]
+//
+// Estructura HTML relevante (simplificada):
+//   <tr class="matchrow ...">
+//     <td class="time">HH:MM</td>
+//     <td class="competition">Liga MX</td>
+//     <td class="match"><a>Equipo A vs Equipo B</a></td>
+//     <td class="tvstation"><a href="/channels/espn-mexico/">ESPN México</a> ...</td>
+//   </tr>
+
+function parseLSTV(html) {
+  const matches = [];
+  // Normalizar comillas simples en atributos a dobles para simplificar el parsing
+  const normalized = html.replace(/([a-z]+=)'([^']*?)'/gi, '$1"$2"');
+  const rowRe = /<tr[^>]+class="[^"]*matchrow[^"]*"[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowM;
+  while ((rowM = rowRe.exec(normalized)) !== null) {
+    const row = rowM[1];
+
+    const timeM = row.match(/<td[^>]+class="[^"]*time[^"]*"[^>]*>([^<]+)</i);
+    const time = timeM ? timeM[1].trim() : "";
+
+    const compM = row.match(/<td[^>]+class="[^"]*competition[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const competition = compM ? compM[1].replace(/<[^>]+>/g, "").trim() : "";
+
+    const matchM = row.match(/<td[^>]+class="[^"]*match[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const matchTitle = matchM ? matchM[1].replace(/<[^>]+>/g, "").trim() : "";
+
+    if (!matchTitle) continue;
+
+    const tvM = row.match(/<td[^>]+class="[^"]*tvstation[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const channels = [];
+    if (tvM) {
+      const linkRe = /<a[^>]+href="[^"]*\/channels\/([^/"]+)\/"[^>]*>([^<]+)<\/a>/gi;
+      let lm;
+      while ((lm = linkRe.exec(tvM[1])) !== null) {
+        const slug = lm[1].trim();
+        const name = lm[2].trim();
+        if (slug && name) channels.push({ slug, name });
+      }
+    }
+
+    if (channels.length) {
+      matches.push({ matchTitle, time, competition, channels });
+    }
+  }
+  return matches;
+}
+
+// ── Fetch del schedule ─────────────────────────────────────────────────────
+
+async function fetchSchedule(baseUrl, date) {
+  await null;
+  const url = baseUrl + date + "/";
+  let r;
+  try {
+    r = await kino.fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; Kino/3.0)",
+        "Accept-Language": "es-MX,es;q=0.9",
+      },
+    });
+  } catch (e) {
+    kino.log("fetchSchedule error:", url, e.message);
+    return [];
+  }
+  if (!r.ok) { kino.log("fetchSchedule HTTP", r.status, url); return []; }
+  return parseLSTV(r.text());
+}
+
+// ── Fusionar schedules MX + US ────────────────────────────────────────────
+// Devuelve: Map<matchTitle_norm, { matchTitle, time, competition, allChannels: [{name,slug}] }>
+
+async function getDayMatches() {
+  await null;
+  const date = todayStr();
+  const cacheKey = "sched-" + date;
+
+  const cached = kino.storage.get(cacheKey);
+  if (cached) {
+    try { return new Map(JSON.parse(cached)); } catch { /* re-fetch */ }
+  }
+
+  const [mxMatches, usMatches] = await Promise.all([
+    fetchSchedule(LSTV_MX, date),
+    fetchSchedule(LSTV_US, date),
+  ]);
+
+  // Fusionar por título normalizado
+  const merged = new Map();
+
+  for (const m of [...mxMatches, ...usMatches]) {
+    const key = norm(m.matchTitle);
+    if (!key) continue;
+    if (merged.has(key)) {
+      // Agregar canales que no estén ya
+      const ex = merged.get(key);
+      const existingSlugs = new Set(ex.allChannels.map((c) => c.slug));
+      for (const ch of m.channels) {
+        if (!existingSlugs.has(ch.slug)) ex.allChannels.push(ch);
+      }
+    } else {
+      merged.set(key, {
+        matchTitle: m.matchTitle,
+        time: m.time,
+        competition: m.competition,
+        allChannels: [...m.channels],
+      });
+    }
+  }
+
+  try {
+    const ser = JSON.stringify([...merged]);
+    if (ser.length < 200000) kino.storage.set(cacheKey, ser, { ttlMs: SCHED_TTL });
+  } catch { /* ignorar */ }
+
+  return merged;
+}
+
+// ── Construir ítems de canal para Kino ────────────────────────────────────
+// Cada canal disponible para un partido se convierte en un ítem separado
+// con el nombre del canal en el título → el usuario elige cuál ver.
+//
+// ref = "live|<matchId>|<channelNorm>"
+
+function matchItems(matchKey, matchData, iptvIndex) {
   const items = [];
-  const seen = new Set();
+  const seenChannels = new Set();
 
-  for (const match of page) {
-    // Para partidos con source "admin", el id del canal está en sources[0].id
-    // Ej: { source: "admin", id: "ppv-nfl-network" }
-    // Para otros sources (golf, delta, hotel), el partido no tiene canal fijo
-    // sino que es un evento → buscamos por título del partido o categoría
+  for (const ch of matchData.allChannels) {
+    const iptvEntry = findIptv(iptvIndex, ch.name);
+    if (!iptvEntry) continue;
+    const channelNorm = norm(ch.name);
+    if (seenChannels.has(channelNorm)) continue;
+    seenChannels.add(channelNorm);
 
-    let channelName = null;
+    // id único por partido+canal
+    const id = slugify(matchKey + "-" + channelNorm).slice(0, 128);
+    const title = matchData.matchTitle + " · " + ch.name;
+    const ref = "live|" + id + "|" + encodeURIComponent(iptvEntry.name);
 
-    // Buscar nombre de canal en las sources
-    for (const src of (match.sources || [])) {
-      if (src.source === "admin") {
-        channelName = channelNameFromId(src.id);
-        break;
-      }
-    }
-
-    // Si no hay canal admin, intentar con el título del partido
-    // (a veces streamed.pk pone directamente el nombre del canal como título)
-    if (!channelName && match.title) {
-      // Solo si el título parece un canal (no tiene "vs")
-      if (!match.title.includes(" vs ") && !match.title.includes(" v ")) {
-        channelName = match.title;
-      }
-    }
-
-    if (!channelName) continue; // partido sin canal identificable
-
-    // Buscar stream en IPTV-org
-    const iptvStream = findIptvStream(index, channelName);
-    if (!iptvStream) {
-      kino.log("Sin stream IPTV para:", channelName);
-      continue;
-    }
-
-    const rawId = String(match.id || "");
-    const id = /^[A-Za-z0-9._~-]{1,128}$/.test(rawId) ? rawId : slugify(rawId);
-    if (seen.has(id)) continue;
-    seen.add(id);
-
-    const ch = matchToChannel(match, categoryId, iptvStream);
-    items.push(ch);
+    items.push({ id, title, ref, channelName: ch.name });
   }
-
-  return { items, next };
+  return items;
 }
 
 // ── home ──────────────────────────────────────────────────────────────────
+
 export async function home() {
   await null;
 
-  const [index, matches] = await Promise.all([
+  const [index, dayMatches] = await Promise.all([
     getIptvIndex(),
-    apiGet("/matches/all-today").catch(() => []),
-  ]);
+    getDayMatches(),
+  ]).catch((e) => { throw e; });
 
-  if (!Array.isArray(matches) || !matches.length) return [];
+  if (!dayMatches.size) return [];
 
-  // Separar en dos grupos: con canal identificable y sin él
-  const withChannel = [];
-  const withoutChannel = [];
+  const withStream = [];
+  const withoutStream = [];
 
-  for (const match of matches.slice(0, 200)) {
-    let channelName = null;
-    for (const src of (match.sources || [])) {
-      if (src.source === "admin") {
-        channelName = channelNameFromId(src.id);
-        break;
-      }
-    }
-    if (!channelName && match.title && !match.title.includes(" vs ")) {
-      channelName = match.title;
-    }
-
-    if (channelName) {
-      const iptvStream = findIptvStream(index, channelName);
-      if (iptvStream) {
-        withChannel.push({ match, channelName, iptvStream });
-        continue;
-      }
-    }
-    withoutChannel.push({ match, channelName });
+  for (const [key, data] of dayMatches) {
+    const items = matchItems(key, data, index);
+    if (items.length) withStream.push({ key, data, items });
+    else withoutStream.push({ key, data });
   }
 
   const rows = [];
-  const seen = new Set();
+  const seenIds = new Set();
 
-  // Fila 1: partidos con canal en IPTV (hasta 60)
-  if (withChannel.length) {
-    const items = [];
-    for (const { match, iptvStream } of withChannel.slice(0, 60)) {
-      const rawId = String(match.id || "");
-      const id = /^[A-Za-z0-9._~-]{1,128}$/.test(rawId) ? rawId : slugify(rawId);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const home = match.teams?.home?.name;
-      const away = match.teams?.away?.name;
-      const title = home && away ? `${home} vs ${away}` : (match.title || "Partido");
-      let poster;
-      const badge = match.teams?.home?.badge;
-      if (badge) poster = `https://streamed.pk/api/images/badge/${encodeURIComponent(badge)}.webp`;
-
-      items.push({
-        id,
-        title: title.slice(0, 200),
-        kind: "live",
-        ref: buildRef(id, iptvStream.name),
-        poster,
-        badges: [match.category ? String(match.category).slice(0, 20) : undefined].filter(Boolean),
-      });
+  // Fila 1: partidos con stream disponible (hasta 60 ítems)
+  if (withStream.length) {
+    const rowItems = [];
+    for (const { data, items } of withStream) {
+      for (const item of items) {
+        if (seenIds.has(item.id) || rowItems.length >= 60) continue;
+        seenIds.add(item.id);
+        rowItems.push({
+          id: item.id,
+          title: item.title,
+          kind: "live",
+          ref: item.ref,
+          badges: [data.competition, data.time].filter(Boolean).slice(0, 2),
+        });
+      }
     }
-    if (items.length) {
-      rows.push({ id: "eventos-con-stream", title: "Eventos de hoy con stream disponible", items });
+    if (rowItems.length) {
+      rows.push({ id: "con-stream", title: "Partidos de hoy con stream disponible", items: rowItems });
     }
   }
 
-  // Fila 2: partidos populares sin canal en IPTV (informativos, hasta 60)
-  const popularSin = withoutChannel.filter((x) => x.match.popular).slice(0, 60);
-  if (popularSin.length) {
-    const items = [];
-    for (const { match } of popularSin) {
-      const rawId = String(match.id || "");
-      const id = /^[A-Za-z0-9._~-]{1,128}$/.test(rawId) ? rawId : slugify(rawId);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const home = match.teams?.home?.name;
-      const away = match.teams?.away?.name;
-      const title = home && away ? `${home} vs ${away}` : (match.title || "Partido");
-      let poster;
-      const badge = match.teams?.home?.badge;
-      if (badge) poster = `https://streamed.pk/api/images/badge/${encodeURIComponent(badge)}.webp`;
-
-      // Ref vacío — estos no tienen stream disponible todavía
-      // Los incluimos para que el usuario sepa qué hay hoy
-      items.push({
+  // Fila 2: partidos sin stream disponible (informativos, hasta 60)
+  if (withoutStream.length) {
+    const rowItems = [];
+    for (const { key, data } of withoutStream.slice(0, 60)) {
+      const id = slugify(key).slice(0, 128);
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
+      rowItems.push({
         id,
-        title: title.slice(0, 200),
+        title: data.matchTitle,
         kind: "live",
         ref: "live|" + id + "|sin-stream",
-        poster,
-        badges: [match.category ? String(match.category).slice(0, 20) : undefined].filter(Boolean),
+        badges: [data.competition, data.time].filter(Boolean).slice(0, 2),
       });
     }
-    if (items.length) {
-      rows.push({ id: "eventos-sin-stream", title: "Más eventos de hoy", items });
+    if (rowItems.length) {
+      rows.push({ id: "sin-stream", title: "Más partidos de hoy (sin stream)", items: rowItems });
     }
   }
 
   return rows.slice(0, 20);
 }
 
+// ── liveCategories ────────────────────────────────────────────────────────
+// Usamos las competiciones que aparecen en el schedule como categorías
+
+export async function liveCategories() {
+  await null;
+
+  const dayMatches = await getDayMatches();
+  const comps = new Map(); // norm → { id, title }
+
+  for (const [, data] of dayMatches) {
+    if (!data.competition) continue;
+    const id = slugify(data.competition);
+    if (!id || comps.has(id)) continue;
+    comps.set(id, { id, title: data.competition });
+  }
+
+  if (!comps.size) {
+    return [{ id: "futbol", title: "Fútbol" }];
+  }
+
+  return [...comps.values()].slice(0, 200);
+}
+
+// ── liveChannels ──────────────────────────────────────────────────────────
+
+export async function liveChannels({ categoryId, cursor }) {
+  await null;
+
+  const [index, dayMatches] = await Promise.all([getIptvIndex(), getDayMatches()]);
+
+  const PAGE = 40;
+  const start = cursor ? parseInt(cursor, 10) : 0;
+
+  // Filtrar partidos de esta categoría
+  const filtered = [];
+  for (const [key, data] of dayMatches) {
+    const compId = slugify(data.competition);
+    if (compId !== categoryId) continue;
+    filtered.push([key, data]);
+  }
+
+  const page = filtered.slice(start, start + PAGE);
+  const next = start + PAGE < filtered.length ? String(start + PAGE) : undefined;
+
+  const items = [];
+  const seenIds = new Set();
+
+  for (const [key, data] of page) {
+    const matchItems2 = matchItems(key, data, index);
+    for (const item of matchItems2) {
+      if (seenIds.has(item.id)) continue;
+      seenIds.add(item.id);
+      items.push({
+        id: item.id,
+        title: item.title,
+        categoryId,
+        ref: item.ref,
+      });
+    }
+    // Si el partido no tiene stream en IPTV, igual lo mostramos (sin ref de stream)
+    if (!matchItems2.length) {
+      const id = slugify(key).slice(0, 128);
+      if (!seenIds.has(id)) {
+        seenIds.add(id);
+        items.push({
+          id,
+          title: data.matchTitle,
+          categoryId,
+          ref: "live|" + id + "|sin-stream",
+        });
+      }
+    }
+  }
+
+  return { items: items.slice(0, 500), next };
+}
+
 // ── resolve ───────────────────────────────────────────────────────────────
 // ref = "live|<matchId>|<channelName urlencoded>"
+
 export async function resolve(ref) {
   await null;
+
   const parts = String(ref).split("|");
   if (parts.length < 3 || parts[0] !== "live") {
     throw kino.error("not_found", "ref desconocida");
   }
+
   const channelName = decodeURIComponent(parts[2]);
+
   if (channelName === "sin-stream") {
-    throw kino.error("unavailable", "este evento no tiene stream disponible en IPTV-org");
+    throw kino.error("unavailable", "este partido no tiene stream disponible en IPTV-org");
   }
 
-  // Buscar stream en IPTV-org
   const index = await getIptvIndex();
-  const iptvStream = findIptvStream(index, channelName);
+  const entry = findIptv(index, channelName);
 
-  if (!iptvStream?.url) {
+  if (!entry?.url) {
     throw kino.error("not_found", "no se encontró stream para: " + channelName);
   }
 
   return {
-    url: iptvStream.url,
+    url: entry.url,
     mime: "application/vnd.apple.mpegurl",
   };
 }

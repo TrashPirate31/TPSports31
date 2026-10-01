@@ -1,21 +1,17 @@
 {
   "id": "streamed-sports31",
   "name": "StreamedSports31",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "apiVersion": 3,
   "entry": "plugin.js",
-  "description": "Eventos deportivos del día desde streamed.pk, reproducidos con streams de IPTV-org",
+  "description": "Partidos de fútbol del día con canales en español (México, USA y Latinoamérica), streams via IPTV-org",
   "author": "",
   "homepage": "https://github.com/tu-usuario/streamed-sports31",
   "hosts": [
-    "streamed.pk",
+    "www.livesoccertv.com",
     "iptv-org.github.io"
   ],
-  "capabilities": [
-    "home",
-    "resolve",
-    "channels"
-  ],
+  "capabilities": ["home", "resolve", "channels"],
   "liveStreamHosts": "any",
   "color": "#1A6B3C",
   "icon": "icon.png"

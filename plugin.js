@@ -1,5 +1,5 @@
 /// <reference path="./sdk/kino.d.ts" />
-// StreamedSports31 v2.1.0
+// StreamedSports31 v2.1.1
 // Schedule : livesoccertv.com (México /mx/ + USA en español /us-es/)
 // Streams  : iptv-org.github.io (m3u8 directos, sin token)
 // Canales  : cuando un partido tiene varios, el usuario elige cuál ver
@@ -9,8 +9,8 @@ const LSTV_US  = "https://www.livesoccertv.com/us-es/schedules/"; // USA en espa
 const IPTV_M3U = "https://iptv-org.github.io/iptv/categories/sports.m3u";
 
 const IPTV_KEY   = "iptv-index-v2";
-const IPTV_TTL   = 6 * 60 * 60 * 1000;   // 6 h
-const SCHED_TTL  = 30 * 60 * 1000;        // 30 min
+const IPTV_TTL  = 6 * 60 * 60 * 1000;   // 6 h
+const SCHED_TTL = 30 * 60 * 1000;        // 30 min
 
 // ── Utilidades ─────────────────────────────────────────────────────────────
 
@@ -59,23 +59,29 @@ function parseM3U(text) {
   const lines = text.split("\n");
   const out = [];
   let meta = null;
+
   for (const raw of lines) {
     const line = raw.trim();
+
     if (line.startsWith("#EXTINF:")) {
-      const idM    = line.match(/tvg-id="([^"]+)"/);
-      const nameM  = line.match(/tvg-name="([^"]+)"/);
-      const comma  = line.lastIndexOf(",");
+      const idM   = line.match(/tvg-id="([^"]+)"/);
+      const nameM = line.match(/tvg-name="([^"]+)"/);
+      const comma = line.lastIndexOf(",");
+
       meta = {
         channel_id: idM?.[1] || "",
         name: nameM?.[1] || (comma >= 0 ? line.slice(comma + 1).trim() : ""),
       };
+
     } else if (line.startsWith("http") && meta) {
       if (meta.name) out.push({ ...meta, url: line });
       meta = null;
+
     } else if (!line.startsWith("#")) {
       meta = null;
     }
   }
+
   return out;
 }
 
@@ -86,59 +92,94 @@ let _iptvIndex = null;
 
 async function getIptvIndex() {
   await null;
+
   if (_iptvIndex) return _iptvIndex;
 
   const cached = kino.storage.get(IPTV_KEY);
+
   if (cached) {
-    try { _iptvIndex = new Map(JSON.parse(cached)); return _iptvIndex; } catch { /* re-fetch */ }
+    try {
+      _iptvIndex = new Map(JSON.parse(cached));
+      return _iptvIndex;
+    } catch {
+      /* re-fetch */
+    }
   }
 
   let text;
+
   try {
     const r = await kino.fetch(IPTV_M3U);
+
     if (!r.ok) throw kino.error("unavailable", "IPTV-org " + r.status);
+
     text = r.text();
+
   } catch (e) {
     if (e.kinoCode) throw e;
     throw kino.error("unavailable", "no se pudo cargar la lista IPTV");
   }
 
   const channels = parseM3U(text);
+
   kino.log("IPTV sports:", channels.length, "entradas");
 
   // Un canal puede tener varios streams; preferir https
   const byId = new Map();
+
   for (const ch of channels) {
     if (!ch.url || !ch.name) continue;
+
     const ex = byId.get(ch.channel_id);
+
     if (!ex || (!ex.url.startsWith("https") && ch.url.startsWith("https"))) {
       byId.set(ch.channel_id, ch);
     }
   }
 
   _iptvIndex = new Map();
+
   for (const [, ch] of byId) {
     const key = norm(ch.name);
-    if (key && !_iptvIndex.has(key)) _iptvIndex.set(key, ch);
+
+    if (key && !_iptvIndex.has(key)) {
+      _iptvIndex.set(key, ch);
+    }
   }
 
   try {
     const ser = JSON.stringify([..._iptvIndex]);
-    if (ser.length < 250000) kino.storage.set(IPTV_KEY, ser, { ttlMs: IPTV_TTL });
-  } catch { /* ignorar */ }
+
+    if (ser.length < 250000) {
+      kino.storage.set(IPTV_KEY, ser, { ttlMs: IPTV_TTL });
+    }
+
+  } catch {
+    /* ignorar */
+  }
 
   return _iptvIndex;
 }
 
 function findIptv(index, name) {
   if (!name || !index.size) return null;
+
   const n = norm(name);
+
   if (index.has(n)) return index.get(n);
-  let best = null, bestScore = 0;
+
+  let best = null;
+  let bestScore = 0;
+
   for (const [key, val] of index) {
     const s = similarity(n, key);
-    if (s > bestScore && s >= 0.5) { bestScore = s; best = val; }
+
+    if (s > bestScore && s >= 0.5) {
+      bestScore = s;
+      best = val;
+    }
   }
+
   return best;
 }
 
@@ -155,49 +196,92 @@ function findIptv(index, name) {
 
 function parseLSTV(html) {
   const matches = [];
+
   // Normalizar comillas simples en atributos a dobles para simplificar el parsing
-  const normalized = html.replace(/([a-z]+=)'([^']*?)'/gi, '$1"$2"');
-  const rowRe = /<tr[^>]+class="[^"]*matchrow[^"]*"[^>]*>([\s\S]*?)<\/tr>/gi;
+  const normalized = html.replace(
+    /([a-z]+=)'([^']*?)'/gi,
+    '$1"$2"'
+  );
+
+  const rowRe =
+    /<tr[^>]+class="[^"]*matchrow[^"]*"[^>]*>([\s\S]*?)<\/tr>/gi;
+
   let rowM;
+
   while ((rowM = rowRe.exec(normalized)) !== null) {
     const row = rowM[1];
 
-    const timeM = row.match(/<td[^>]+class="[^"]*time[^"]*"[^>]*>([^<]+)</i);
+    const timeM = row.match(
+      /<td[^>]+class="[^"]*time[^"]*"[^>]*>([^<]+)</i
+    );
+
     const time = timeM ? timeM[1].trim() : "";
 
-    const compM = row.match(/<td[^>]+class="[^"]*competition[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
-    const competition = compM ? compM[1].replace(/<[^>]+>/g, "").trim() : "";
+    const compM = row.match(
+      /<td[^>]+class="[^"]*competition[^"]*"[^>]*>([\s\S]*?)<\/td>/i
+    );
 
-    const matchM = row.match(/<td[^>]+class="[^"]*match[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
-    const matchTitle = matchM ? matchM[1].replace(/<[^>]+>/g, "").trim() : "";
+    const competition = compM
+      ? compM[1].replace(/<[^>]+>/g, "").trim()
+      : "";
+
+    const matchM = row.match(
+      /<td[^>]+class="[^"]*match[^"]*"[^>]*>([\s\S]*?)<\/td>/i
+    );
+
+    const matchTitle = matchM
+      ? matchM[1].replace(/<[^>]+>/g, "").trim()
+      : "";
 
     if (!matchTitle) continue;
 
-    const tvM = row.match(/<td[^>]+class="[^"]*tvstation[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const tvM = row.match(
+      /<td[^>]+class="[^"]*tvstation[^"]*"[^>]*>([\s\S]*?)<\/td>/i
+    );
+
     const channels = [];
+
     if (tvM) {
-      const linkRe = /<a[^>]+href="[^"]*\/channels\/([^/"]+)\/"[^>]*>([^<]+)<\/a>/gi;
+      const linkRe =
+        /<a[^>]+href="[^"]*\/channels\/([^/"]+)\/"[^>]*>([^<]+)<\/a>/gi;
+
       let lm;
+
       while ((lm = linkRe.exec(tvM[1])) !== null) {
         const slug = lm[1].trim();
         const name = lm[2].trim();
-        if (slug && name) channels.push({ slug, name });
+
+        if (slug && name) {
+          channels.push({ slug, name });
+        }
       }
     }
 
     if (channels.length) {
-      matches.push({ matchTitle, time, competition, channels });
+      matches.push({
+        matchTitle,
+        time,
+        competition,
+        channels,
+      });
     }
   }
+
   return matches;
 }
 
 // ── Fetch del schedule ─────────────────────────────────────────────────────
 
-async function fetchSchedule(baseUrl, date) {
+async function fetchSchedule(baseUrl) {
   await null;
-  const url = baseUrl + date + "/";
+
+  // IMPORTANTE:
+  // Ya no agregamos la fecha a la URL.
+  // LivesoccerTV detecta automáticamente la fecha.
+  const url = baseUrl;
+
   let r;
+
   try {
     r = await kino.fetch(url, {
       headers: {
@@ -205,11 +289,17 @@ async function fetchSchedule(baseUrl, date) {
         "Accept-Language": "es-MX,es;q=0.9",
       },
     });
+
   } catch (e) {
     kino.log("fetchSchedule error:", url, e.message);
     return [];
   }
-  if (!r.ok) { kino.log("fetchSchedule HTTP", r.status, url); return []; }
+
+  if (!r.ok) {
+    kino.log("fetchSchedule HTTP", r.status, url);
+    return [];
+  }
+
   return parseLSTV(r.text());
 }
 
@@ -218,17 +308,22 @@ async function fetchSchedule(baseUrl, date) {
 
 async function getDayMatches() {
   await null;
-  const date = todayStr();
-  const cacheKey = "sched-" + date;
+
+  const cacheKey = "sched-today";
 
   const cached = kino.storage.get(cacheKey);
+
   if (cached) {
-    try { return new Map(JSON.parse(cached)); } catch { /* re-fetch */ }
+    try {
+      return new Map(JSON.parse(cached));
+    } catch {
+      /* re-fetch */
+    }
   }
 
   const [mxMatches, usMatches] = await Promise.all([
-    fetchSchedule(LSTV_MX, date),
-    fetchSchedule(LSTV_US, date),
+    fetchSchedule(LSTV_MX),
+    fetchSchedule(LSTV_US),
   ]);
 
   // Fusionar por título normalizado
@@ -236,15 +331,26 @@ async function getDayMatches() {
 
   for (const m of [...mxMatches, ...usMatches]) {
     const key = norm(m.matchTitle);
+
     if (!key) continue;
+
     if (merged.has(key)) {
+
       // Agregar canales que no estén ya
       const ex = merged.get(key);
-      const existingSlugs = new Set(ex.allChannels.map((c) => c.slug));
+
+      const existingSlugs = new Set(
+        ex.allChannels.map((c) => c.slug)
+      );
+
       for (const ch of m.channels) {
-        if (!existingSlugs.has(ch.slug)) ex.allChannels.push(ch);
+        if (!existingSlugs.has(ch.slug)) {
+          ex.allChannels.push(ch);
+        }
       }
+
     } else {
+
       merged.set(key, {
         matchTitle: m.matchTitle,
         time: m.time,
@@ -256,8 +362,14 @@ async function getDayMatches() {
 
   try {
     const ser = JSON.stringify([...merged]);
-    if (ser.length < 200000) kino.storage.set(cacheKey, ser, { ttlMs: SCHED_TTL });
-  } catch { /* ignorar */ }
+
+    if (ser.length < 200000) {
+      kino.storage.set(cacheKey, ser, { ttlMs: SCHED_TTL });
+    }
+
+  } catch {
+    /* ignorar */
+  }
 
   return merged;
 }
@@ -274,18 +386,36 @@ function matchItems(matchKey, matchData, iptvIndex) {
 
   for (const ch of matchData.allChannels) {
     const iptvEntry = findIptv(iptvIndex, ch.name);
+
     if (!iptvEntry) continue;
+
     const channelNorm = norm(ch.name);
+
     if (seenChannels.has(channelNorm)) continue;
+
     seenChannels.add(channelNorm);
 
     // id único por partido+canal
-    const id = slugify(matchKey + "-" + channelNorm).slice(0, 128);
-    const title = matchData.matchTitle + " · " + ch.name;
-    const ref = "live|" + id + "|" + encodeURIComponent(iptvEntry.name);
+    const id = slugify(
+      matchKey + "-" + channelNorm
+    ).slice(0, 128);
 
-    items.push({ id, title, ref, channelName: ch.name });
+    const title = matchData.matchTitle + " · " + ch.name;
+
+    const ref =
+      "live|" +
+      id +
+      "|" +
+      encodeURIComponent(iptvEntry.name);
+
+    items.push({
+      id,
+      title,
+      ref,
+      channelName: ch.name,
+    });
   }
+
   return items;
 }
 
@@ -297,7 +427,9 @@ export async function home() {
   const [index, dayMatches] = await Promise.all([
     getIptvIndex(),
     getDayMatches(),
-  ]).catch((e) => { throw e; });
+  ]).catch((e) => {
+    throw e;
+  });
 
   if (!dayMatches.size) return [];
 
@@ -306,8 +438,12 @@ export async function home() {
 
   for (const [key, data] of dayMatches) {
     const items = matchItems(key, data, index);
-    if (items.length) withStream.push({ key, data, items });
-    else withoutStream.push({ key, data });
+
+    if (items.length) {
+      withStream.push({ key, data, items });
+    } else {
+      withoutStream.push({ key, data });
+    }
   }
 
   const rows = [];
@@ -315,42 +451,73 @@ export async function home() {
 
   // Fila 1: partidos con stream disponible (hasta 60 ítems)
   if (withStream.length) {
+
     const rowItems = [];
+
     for (const { data, items } of withStream) {
+
       for (const item of items) {
-        if (seenIds.has(item.id) || rowItems.length >= 60) continue;
+
+        if (
+          seenIds.has(item.id) ||
+          rowItems.length >= 60
+        ) continue;
+
         seenIds.add(item.id);
+
         rowItems.push({
           id: item.id,
           title: item.title,
           kind: "live",
           ref: item.ref,
-          badges: [data.competition, data.time].filter(Boolean).slice(0, 2),
+          badges: [
+            data.competition,
+            data.time,
+          ].filter(Boolean).slice(0, 2),
         });
       }
     }
+
     if (rowItems.length) {
-      rows.push({ id: "con-stream", title: "Partidos de hoy con stream disponible", items: rowItems });
+      rows.push({
+        id: "con-stream",
+        title: "Partidos de hoy con stream disponible",
+        items: rowItems,
+      });
     }
   }
 
   // Fila 2: partidos sin stream disponible (informativos, hasta 60)
   if (withoutStream.length) {
+
     const rowItems = [];
+
     for (const { key, data } of withoutStream.slice(0, 60)) {
+
       const id = slugify(key).slice(0, 128);
+
       if (seenIds.has(id)) continue;
+
       seenIds.add(id);
+
       rowItems.push({
         id,
         title: data.matchTitle,
         kind: "live",
         ref: "live|" + id + "|sin-stream",
-        badges: [data.competition, data.time].filter(Boolean).slice(0, 2),
+        badges: [
+          data.competition,
+          data.time,
+        ].filter(Boolean).slice(0, 2),
       });
     }
+
     if (rowItems.length) {
-      rows.push({ id: "sin-stream", title: "Más partidos de hoy (sin stream)", items: rowItems });
+      rows.push({
+        id: "sin-stream",
+        title: "Más partidos de hoy (sin stream)",
+        items: rowItems,
+      });
     }
   }
 
@@ -364,17 +531,31 @@ export async function liveCategories() {
   await null;
 
   const dayMatches = await getDayMatches();
-  const comps = new Map(); // norm → { id, title }
 
+  const comps = new Map();
+
+  // norm → { id, title }
   for (const [, data] of dayMatches) {
+
     if (!data.competition) continue;
+
     const id = slugify(data.competition);
+
     if (!id || comps.has(id)) continue;
-    comps.set(id, { id, title: data.competition });
+
+    comps.set(id, {
+      id,
+      title: data.competition,
+    });
   }
 
   if (!comps.size) {
-    return [{ id: "futbol", title: "Fútbol" }];
+    return [
+      {
+        id: "futbol",
+        title: "Fútbol",
+      },
+    ];
   }
 
   return [...comps.values()].slice(0, 200);
@@ -385,30 +566,50 @@ export async function liveCategories() {
 export async function liveChannels({ categoryId, cursor }) {
   await null;
 
-  const [index, dayMatches] = await Promise.all([getIptvIndex(), getDayMatches()]);
+  const [index, dayMatches] = await Promise.all([
+    getIptvIndex(),
+    getDayMatches(),
+  ]);
 
   const PAGE = 40;
   const start = cursor ? parseInt(cursor, 10) : 0;
 
   // Filtrar partidos de esta categoría
   const filtered = [];
+
   for (const [key, data] of dayMatches) {
+
     const compId = slugify(data.competition);
+
     if (compId !== categoryId) continue;
+
     filtered.push([key, data]);
   }
 
-  const page = filtered.slice(start, start + PAGE);
-  const next = start + PAGE < filtered.length ? String(start + PAGE) : undefined;
+  const page = filtered.slice(
+    start,
+    start + PAGE
+  );
+
+  const next =
+    start + PAGE < filtered.length
+      ? String(start + PAGE)
+      : undefined;
 
   const items = [];
   const seenIds = new Set();
 
   for (const [key, data] of page) {
-    const matchItems2 = matchItems(key, data, index);
+
+    const matchItems2 =
+      matchItems(key, data, index);
+
     for (const item of matchItems2) {
+
       if (seenIds.has(item.id)) continue;
+
       seenIds.add(item.id);
+
       items.push({
         id: item.id,
         title: item.title,
@@ -416,11 +617,17 @@ export async function liveChannels({ categoryId, cursor }) {
         ref: item.ref,
       });
     }
-    // Si el partido no tiene stream en IPTV, igual lo mostramos (sin ref de stream)
+
+    // Si el partido no tiene stream en IPTV,
+    // igual lo mostramos (sin ref de stream)
     if (!matchItems2.length) {
+
       const id = slugify(key).slice(0, 128);
+
       if (!seenIds.has(id)) {
+
         seenIds.add(id);
+
         items.push({
           id,
           title: data.matchTitle,
@@ -431,7 +638,10 @@ export async function liveChannels({ categoryId, cursor }) {
     }
   }
 
-  return { items: items.slice(0, 500), next };
+  return {
+    items: items.slice(0, 500),
+    next,
+  };
 }
 
 // ── resolve ───────────────────────────────────────────────────────────────
@@ -441,25 +651,41 @@ export async function resolve(ref) {
   await null;
 
   const parts = String(ref).split("|");
-  if (parts.length < 3 || parts[0] !== "live") {
-    throw kino.error("not_found", "ref desconocida");
+
+  if (
+    parts.length < 3 ||
+    parts[0] !== "live"
+  ) {
+    throw kino.error(
+      "not_found",
+      "ref desconocida"
+    );
   }
 
-  const channelName = decodeURIComponent(parts[2]);
+  const channelName =
+    decodeURIComponent(parts[2]);
 
   if (channelName === "sin-stream") {
-    throw kino.error("unavailable", "este partido no tiene stream disponible en IPTV-org");
+    throw kino.error(
+      "unavailable",
+      "este partido no tiene stream disponible en IPTV-org"
+    );
   }
 
   const index = await getIptvIndex();
-  const entry = findIptv(index, channelName);
+
+  const entry =
+    findIptv(index, channelName);
 
   if (!entry?.url) {
-    throw kino.error("not_found", "no se encontró stream para: " + channelName);
+    throw kino.error(
+      "not_found",
+      "no se encontró stream para: " + channelName
+    );
   }
 
   return {
     url: entry.url,
     mime: "application/vnd.apple.mpegurl",
   };
-}
+  }

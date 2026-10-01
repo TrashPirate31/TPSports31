@@ -1,7 +1,7 @@
 {
   "id": "streamed-sports31",
   "name": "StreamedSports31",
-  "version": "2.1.1",
+  "version": "2.5.1",
   "apiVersion": 3,
   "entry": "plugin.js",
   "description": "Partidos de fútbol del día con canales en español (México, USA y Latinoamérica), streams via IPTV-org",

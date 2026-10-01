@@ -1,5 +1,5 @@
 /// <reference path="./sdk/kino.d.ts" />
-// StreamedSports31 v2.1.1
+// StreamedSports31 v2.5.1
 // Schedule : livesoccertv.com (México /mx/ + USA en español /us-es/)
 // Streams  : iptv-org.github.io (m3u8 directos, sin token)
 // Canales  : cuando un partido tiene varios, el usuario elige cuál ver

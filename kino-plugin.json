@@ -1,15 +1,15 @@
 {
   "id": "streamed-sports31",
   "name": "StreamedSports31",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "apiVersion": 3,
   "entry": "plugin.js",
-  "description": "Eventos deportivos en vivo con streams en español, vía streamed.pk",
+  "description": "Eventos deportivos del día desde streamed.pk, reproducidos con streams de IPTV-org",
   "author": "",
   "homepage": "https://github.com/tu-usuario/streamed-sports31",
   "hosts": [
     "streamed.pk",
-    "embed.st"
+    "iptv-org.github.io"
   ],
   "capabilities": [
     "home",
@@ -17,6 +17,6 @@
     "channels"
   ],
   "liveStreamHosts": "any",
-  "color": "#E8333A",
+  "color": "#1A6B3C",
   "icon": "icon.png"
 }

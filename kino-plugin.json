@@ -1,18 +1,18 @@
 {
-  "id": "streamedsports31",
+  "id": "streamed-sports31",
   "name": "StreamedSports31",
-  "version": "3.2.1",
+  "version": "3.3.0",
   "apiVersion": 3,
+  "entry": "plugin.js",
   "description": "Agenda deportiva y streams HLS de LiveSoccerTV e IPTV-org",
-  "entry": "./plugin.js",
-  "capabilities": [
-    "channels"
-  ],
+  "author": "",
+  "homepage": "https://github.com/tu-usuario/streamed-sports31",
   "hosts": [
-    "https://www.livesoccertv.com/*",
-    "https://*.livesoccertv.com/*",
-    "https://iptv-org.github.io/*",
-    "https://*.iptv-org.github.io/*"
+    "www.livesoccertv.com",
+    "iptv-org.github.io"
   ],
-  "liveStreamHosts": "any"
+  "capabilities": ["home", "search", "resolve", "channels"],
+  "liveStreamHosts": "any",
+  "color": "#1A6B3C",
+  "icon": "icon.png"
 }

@@ -83,6 +83,7 @@ function parseM3U(text) {
 let _iptvIndex = null;
 
 async function getIptvIndex() {
+  await null;
   if (_iptvIndex) return _iptvIndex;
 
   const cached = kino.storage.get(IPTV_KEY);
@@ -167,58 +168,45 @@ function findIptv(index, name) {
   return best;
 }
 
-// ── Parsear HTML con kino.html.select ──────────────────────────────────────
+// ── Parsear HTML de livesoccertv ──────────────────────────────────────────
 
 function parseLSTV(html) {
   if (typeof html !== "string" || !html) return [];
   const matches = [];
-
-  try {
-    const rows = kino.html.select(html, "tr.matchrow");
-
-    for (const row of rows) {
-      const timeNodes = kino.html.select(row.html, "td.time");
-      const time = timeNodes[0]?.text?.trim() || "";
-
-      const compNodes = kino.html.select(row.html, "td.competition");
-      const competition = compNodes[0]?.text?.trim() || "";
-
-      const matchNodes = kino.html.select(row.html, "td.match");
-      const matchTitle = matchNodes[0]?.text?.trim() || "";
-
-      if (!matchTitle) continue;
-
-      const tvLinks = kino.html.select(row.html, "td.tvstation a");
-      const channels = [];
-
-      for (const link of tvLinks) {
-        const href = link.attrs?.href || "";
-        const slugM = href.match(/\/channels\/([^/"]+)\//);
-        const slug = slugM ? slugM[1].trim() : "";
-        const name = link.text?.trim() || "";
-
-        if (slug && name) {
-          channels.push({ slug, name });
-        }
+  // Normalizar comillas simples en atributos HTML a dobles
+  const normalized = html.replace(/([a-zA-Z-]+=)'([^']*?)'/g, "$1\"$2\"");
+  const rowRe = /<tr[^>]+class="[^"]*matchrow[^"]*"[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowM;
+  while ((rowM = rowRe.exec(normalized)) !== null) {
+    const row = rowM[1];
+    const timeM = row.match(/<td[^>]+class="[^"]*time[^"]*"[^>]*>([^<]+)</i);
+    const time = timeM ? timeM[1].trim() : "";
+    const compM = row.match(/<td[^>]+class="[^"]*competition[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const competition = compM ? compM[1].replace(/<[^>]+>/g, "").trim() : "";
+    const matchM = row.match(/<td[^>]+class="[^"]*match[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const matchTitle = matchM ? matchM[1].replace(/<[^>]+>/g, "").trim() : "";
+    if (!matchTitle) continue;
+    const tvM = row.match(/<td[^>]+class="[^"]*tvstation[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const channels = [];
+    if (tvM) {
+      const linkRe = /<a[^>]+href="[^"]*\/channels\/([^/"]+)\/"[^>]*>([^<]+)<\/a>/gi;
+      let lm;
+      while ((lm = linkRe.exec(tvM[1])) !== null) {
+        const slug = lm[1].trim();
+        const name = lm[2].trim();
+        if (slug && name) channels.push({ slug, name });
       }
-
-      matches.push({
-        matchTitle,
-        time,
-        competition,
-        channels,
-      });
     }
-  } catch (e) {
-    kino.log("Error parseando HTML:", e.message);
+    if (channels.length) matches.push({ matchTitle, time, competition, channels });
   }
-
   return matches;
 }
 
 // ── Fetch del schedule ─────────────────────────────────────────────────────
 
 async function fetchSchedule(baseUrl) {
+  await null;
+  // Livesoccertv redirige a la fecha de hoy automáticamente con la URL base
   try {
     const r = await kino.fetch(baseUrl, {
       headers: {
@@ -245,6 +233,7 @@ async function fetchSchedule(baseUrl) {
 // ── Fusionar schedules MX + US ────────────────────────────────────────────
 
 async function getDayMatches() {
+  await null;
   const cacheKey = "sched-today";
   const cached = kino.storage.get(cacheKey);
 
@@ -560,6 +549,7 @@ export async function liveChannels({ categoryId, cursor }) {
 // ── resolve ───────────────────────────────────────────────────────────────
 
 export async function resolve(ref) {
+  await null;
   const parts = String(ref).split("|");
 
   if (parts.length < 3 || parts[0] !== "live") {

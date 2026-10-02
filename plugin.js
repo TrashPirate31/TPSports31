@@ -1,10 +1,10 @@
 /// <reference path="./sdk/kino.d.ts" />
-// StreamedSports31 v3.5.0
+// StreamedSports31 v3.6.0
 // Schedule : livesoccertv.com (México /mx/ + USA en español /us-es/)
 // Streams  : iptv-org.github.io (m3u8 directos, sin token)
 
-const LSTV_MX  = "https://www.livesoccertv.com/mx/schedules/";   // México
-const LSTV_US  = "https://www.livesoccertv.com/us-es/schedules/"; // USA en español
+const LSTV_MX  = "https://www.livesoccertv.com/es/";   // México
+const LSTV_US  = "https://www.livesoccertv.com/"; // USA en español
 const IPTV_M3U = "https://iptv-org.github.io/iptv/categories/sports.m3u";
 
 const IPTV_KEY  = "iptv-index-v3";

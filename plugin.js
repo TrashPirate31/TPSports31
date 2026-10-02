@@ -1,10 +1,10 @@
 /// <reference path="./sdk/kino.d.ts" />
-// StreamedSports31 v3.9.0
+// StreamedSports31 v3.9.1
 // Corrección de estado EN VIVO y solución de carga de streams
 
 const LSTV_MX  = "https://www.livesoccertv.com/es/";
 const LSTV_US  = "https://www.livesoccertv.com/";
-const IPTV_M3U = "https://iptv-org.github.io/iptv/categories/sports.m3u";
+const IPTV_M3U = "https://iptv-org.github.io/iptv/languages/spa.m3u";
 
 const IPTV_KEY  = "iptv-index-v390";
 const IPTV_TTL  = 6 * 60 * 60 * 1000;  // 6 horas

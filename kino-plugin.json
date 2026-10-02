@@ -4,14 +4,15 @@
   "version": "3.2.1",
   "apiVersion": 3,
   "description": "Agenda deportiva y streams HLS de LiveSoccerTV e IPTV-org",
-  "entry": "plugin.js",
-  "main": "plugin.js",
+  "entry": "./plugin.js",
   "capabilities": [
     "channels"
   ],
   "hosts": [
-    "https://www.livesoccertv.com",
-    "https://iptv-org.github.io"
+    "https://www.livesoccertv.com/*",
+    "https://*.livesoccertv.com/*",
+    "https://iptv-org.github.io/*",
+    "https://*.iptv-org.github.io/*"
   ],
   "liveStreamHosts": "any"
 }

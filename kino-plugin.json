@@ -4,8 +4,8 @@
   "version": "3.1.1",
   "apiVersion": 3,
   "description": "Agenda deportiva y streams HLS de LiveSoccerTV e IPTV-org",
-  "entry": "./plugin.js",
-  "main": "./plugin.js",
+  "entry": "plugin.js",
+  "main": "plugin.js",
   "capabilities": [
     "channels"
   ],

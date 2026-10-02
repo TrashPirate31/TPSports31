@@ -1,9 +1,9 @@
 {
   "id": "streamed-sports31",
   "name": "StreamedSports31",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "apiVersion": 3,
-  "entry": "./plugin.js",
+  "entry": "plugin.js",
   "description": "Agenda deportiva y streams HLS de LiveSoccerTV e IPTV-org",
   "author": "",
   "homepage": "https://github.com/tu-usuario/streamed-sports31",

@@ -1,4 +1,4 @@
-// TypeScript declarations for Kino plugins (apiVersion 1, 2 and 3). Reference them from plugin.js
+// TypeScript declarations for Kino plugins (apiVersion 1, 2, 3 and 4). Reference them from plugin.js
 // with `/// <reference path="./kino.d.ts" />` for editor help; Kino itself runs plain JavaScript.
 // The numbers in the comments come from contract.json, which is authoritative. The app checks that
 // every `kino` member declared here exists in its runtime and nothing else does (KinoDtsTest).
@@ -340,6 +340,9 @@ declare namespace kino {
 
   /** 0..5000 ms, counts inside the call's own timeout. */
   function sleep(ms: number): Promise<void>;
+
+  /** apiVersion 4: a marker for a secret the manifest's `secrets` declares (throws for any other name). Kino swaps it for the value in `kino.fetch`, toward the manifest's own hosts only; your code never sees the value. */
+  function secret(name: string): string;
 
   /** Writes to Kino's log (and console.* does the same); lines are cut at 2000 characters. */
   function log(...args: unknown[]): void;

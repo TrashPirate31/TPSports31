@@ -1,5 +1,5 @@
 /// <reference path="./sdk/kino.d.ts" />
-// StreamedSports31 v3.9.1
+// StreamedSports31 v4.0.0
 // Corrección de estado EN VIVO y solución de carga de streams
 
 const LSTV_MX  = "https://www.livesoccertv.com/es/";

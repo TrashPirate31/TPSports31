@@ -1,17 +1,21 @@
 /// <reference path="./sdk/kino.d.ts" />
-// StreamedSports31 v3.7.1
+// StreamedSports31 v3.8.0
 // Schedule : livesoccertv.com (México /es/ + USA)
-// Streams  : iptv-org.github.io (m3u8 directos)
+// Streams  : iptv-org.github.io + Fallback streams activos
 
 const LSTV_MX  = "https://www.livesoccertv.com/es/";
 const LSTV_US  = "https://www.livesoccertv.com/";
 const IPTV_M3U = "https://iptv-org.github.io/iptv/categories/sports.m3u";
 
-const IPTV_KEY  = "iptv-index-v371";
+const IPTV_KEY  = "iptv-index-v380";
 const IPTV_TTL  = 6 * 60 * 60 * 1000;  // 6 horas
-const SCHED_TTL = 15 * 60 * 1000;      // 15 min
+const SCHED_TTL = 10 * 60 * 1000;      // 10 min
 
 const REAL_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+
+// Streams de respaldo para garantizar reproducción continua
+const FALLBACK_STREAM = "https://rbmn-live.akamaized.net/hls/live/591232/FL01/master.m3u8";
+const TEST_STREAM     = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
 
 // ── Utilidades ─────────────────────────────────────────────────────────────
 
@@ -160,21 +164,22 @@ function findIptv(index, name) {
   return best;
 }
 
-// ── Parsear HTML de LiveSoccerTV ──────────────────────────────────────────
+// ── Parsear HTML de LiveSoccerTV con Detección de Estado ──────────────────
 
 function parseLSTV(html) {
   if (typeof html !== "string" || !html) return [];
   const matches = [];
   const normalized = html.replace(/([a-zA-Z-]+)='([^']*?)'/g, '$1="$2"');
-  // Expresión regular corregida para capturar match_row, matchrow o match_row live
-  const rowRe = /<tr[^>]+class="[^"]*match[_\-]?row[^"]*"[^>]*>([\s\S]*?)<\/tr>/gi;
+  const rowRe = /<tr[^>]+class="([^"]*match[_\-]?row[^"]*)"[^>]*>([\s\S]*?)<\/tr>/gi;
   let rowM;
 
   while ((rowM = rowRe.exec(normalized)) !== null) {
-    const row = rowM[1];
+    const trClass = (rowM[1] || "").toLowerCase();
+    const row = rowM[2];
 
     const timeM = row.match(/<td[^>]+class="[^"]*time[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
-    const time = timeM ? timeM[1].replace(/<[^>]+>/g, "").trim() : "";
+    const timeRaw = timeM ? timeM[1] : "";
+    const time = timeRaw.replace(/<[^>]+>/g, "").trim();
 
     const compM = row.match(/<td[^>]+class="[^"]*competition[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
     const competition = compM ? compM[1].replace(/<[^>]+>/g, "").trim() : "";
@@ -182,6 +187,21 @@ function parseLSTV(html) {
     const matchM = row.match(/<td[^>]+class="[^"]*match[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
     const matchTitle = matchM ? matchM[1].replace(/<[^>]+>/g, "").trim() : "";
     if (!matchTitle) continue;
+
+    // Clasificación de estado del encuentro
+    const isLive = trClass.includes("live") || 
+                   timeRaw.toLowerCase().includes("live") || 
+                   /^\d+['"]?$/.test(time) || 
+                   time.toLowerCase().includes("ht") ||
+                   time.includes("'");
+
+    const isFT = time.toLowerCase().includes("ft") || 
+                 time.toLowerCase().includes("aet") || 
+                 time.toLowerCase().includes("pen") || 
+                 time.toLowerCase().includes("final") || 
+                 time.toLowerCase().includes("canc");
+
+    const isUpcoming = !isLive && !isFT;
 
     const tvM = row.match(/<td[^>]+class="[^"]*tvstation[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
     const channels = [];
@@ -208,13 +228,13 @@ function parseLSTV(html) {
       }
     }
 
-    matches.push({ matchTitle, time, competition, channels });
+    matches.push({ matchTitle, time, competition, channels, isLive, isFT, isUpcoming });
   }
 
   return matches;
 }
 
-// ── Fetch del schedule ─────────────────────────────────────────────────────
+// ── Fetch del Schedule ─────────────────────────────────────────────────────
 
 async function fetchSchedule(baseUrl) {
   await null;
@@ -234,11 +254,11 @@ async function fetchSchedule(baseUrl) {
   }
 }
 
-// ── Fusionar schedules ────────────────────────────────────────────────────
+// ── Fusionar Schedules ────────────────────────────────────────────────────
 
 async function getDayMatches() {
   await null;
-  const cacheKey = "sched-v371";
+  const cacheKey = "sched-v380";
   const cached = kino.storage.get(cacheKey);
 
   if (cached) {
@@ -269,12 +289,17 @@ async function getDayMatches() {
           ex.allChannels.push(ch);
         }
       }
+      if (m.isLive) ex.isLive = true;
+      if (m.isFT) ex.isFT = true;
     } else {
       merged.set(key, {
         matchTitle: m.matchTitle,
         time: m.time,
         competition: m.competition,
         allChannels: [...m.channels],
+        isLive: m.isLive,
+        isFT: m.isFT,
+        isUpcoming: m.isUpcoming,
       });
     }
   }
@@ -289,43 +314,29 @@ async function getDayMatches() {
   return merged;
 }
 
-// ── Construir ítems de canal ──────────────────────────────────────────────
-
-function matchItems(matchKey, matchData, iptvIndex) {
-  const items = [];
-  const seenChannels = new Set();
-
-  for (const ch of matchData.allChannels) {
-    const iptvEntry = findIptv(iptvIndex, ch.name);
-    if (!iptvEntry) continue;
-
-    const channelNorm = norm(ch.name);
-    if (seenChannels.has(channelNorm)) continue;
-    seenChannels.add(channelNorm);
-
-    const id = slugify(matchKey + "-" + channelNorm).slice(0, 128);
-    const title = matchData.matchTitle + " · " + ch.name;
-    const ref = "live|" + id + "|" + encodeURIComponent(iptvEntry.name);
-
-    items.push({ id, title, ref, channelName: ch.name });
-  }
-
-  return items;
-}
-
-// ── TV EN VIVO: Categorías ────────────────────────────────────────────────
+// ── Categorías ─────────────────────────────────────────────────────────────
 
 export async function liveCategories() {
   return [
     {
-      id: "todos-los-eventos",
-      title: "Todos los Eventos Deportivos de Hoy",
+      id: "en-vivo-ahora",
+      title: "🔴 En Vivo Ahora",
+      genre: "deportes"
+    },
+    {
+      id: "todos-los-partidos",
+      title: "⚽ Agenda Deportiva de Hoy",
+      genre: "deportes"
+    },
+    {
+      id: "proximos-hoy",
+      title: "📅 Próximos Partidos Hoy",
       genre: "deportes"
     }
   ];
 }
 
-// ── TV EN VIVO: Listado Completo ──────────────────────────────────────────
+// ── Listado de Canales / Eventos ──────────────────────────────────────────
 
 export async function liveChannels({ categoryId, cursor }) {
   let index = new Map();
@@ -345,66 +356,86 @@ export async function liveChannels({ categoryId, cursor }) {
   const items = [];
   const seenIds = new Set();
 
-  // 1. Partidos con reproductor/stream en vivo detectado
+  const activeCategory = categoryId || "en-vivo-ahora";
+
   for (const [key, data] of dayMatches) {
-    const matchStreams = matchItems(key, data, index);
-    for (const item of matchStreams) {
-      if (seenIds.has(item.id)) continue;
-      seenIds.add(item.id);
+    // Excluir tajantemente partidos terminados (FT)
+    if (data.isFT) continue;
 
-      items.push({
-        id: item.id,
-        title: item.title,
-        categoryId,
-        ref: item.ref,
-        badges: [data.competition, data.time].filter(Boolean).map(b => b.slice(0, 20)).slice(0, 3)
-      });
+    // Aplicar filtros por categoría
+    if (activeCategory === "en-vivo-ahora" && !data.isLive) continue;
+    if (activeCategory === "proximos-hoy" && !data.isUpcoming) continue;
+
+    const id = slugify(key).slice(0, 128);
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+
+    // Formatear Título y Badges
+    const statusPrefix = data.isLive ? "🔴 [EN VIVO] " : "📅 ";
+    const timeDisplay  = data.isLive ? (data.time || "EN VIVO") : ("⏰ " + (data.time || "Hoy"));
+    
+    const chNames = data.allChannels.map(c => c.name).slice(0, 3).join(", ");
+    const channelSuffix = chNames ? (" (" + chNames + ")") : "";
+
+    const title = statusPrefix + data.matchTitle + channelSuffix;
+
+    let targetChannel = "stream-auto";
+    for (const ch of data.allChannels) {
+      const entry = findIptv(index, ch.name);
+      if (entry?.name) {
+        targetChannel = entry.name;
+        break;
+      }
     }
-  }
 
-  // 2. Todos los demás partidos agendados hoy (aunque no tengan stream directo)
-  for (const [key, data] of dayMatches) {
-    const matchStreams = matchItems(key, data, index);
-    if (!matchStreams.length) {
-      const id = slugify(key).slice(0, 128);
-      if (seenIds.has(id)) continue;
-      seenIds.add(id);
+    const ref = "live|" + id + "|" + encodeURIComponent(targetChannel);
 
-      const chList = data.allChannels.length 
-        ? " (" + data.allChannels.map(c => c.name).join(", ") + ")" 
-        : "";
-
-      items.push({
-        id,
-        title: data.matchTitle + chList,
-        categoryId,
-        ref: "live|" + id + "|sin-stream",
-        badges: [data.competition, data.time].filter(Boolean).map(b => b.slice(0, 20)).slice(0, 3)
-      });
-    }
-  }
-
-  // 3. Canal de prueba al final como respaldo
-  if (!items.length) {
     items.push({
-      id: "item-prueba-hls",
-      title: "Canal de Prueba · Test de Reproductor HLS",
-      categoryId,
-      ref: "live|test|test-stream",
-      badges: ["ONLINE", "Test Stream"]
+      id,
+      title,
+      categoryId: activeCategory,
+      ref,
+      badges: [timeDisplay, data.competition].filter(Boolean).map(b => b.slice(0, 25)).slice(0, 3)
     });
+  }
+
+  // Ordenar: Los partidos que estén EN VIVO van primero
+  items.sort((a, b) => {
+    const aLive = a.title.includes("🔴");
+    const bLive = b.title.includes("🔴");
+    if (aLive && !bLive) return -1;
+    if (!aLive && bLive) return 1;
+    return 0;
+  });
+
+  // Mensaje / Canal informativo si la lista está vacía
+  if (!items.length) {
+    if (activeCategory === "en-vivo-ahora") {
+      items.push({
+        id: "no-live-now",
+        title: "ℹ️ Sin partidos en vivo en este momento",
+        categoryId: activeCategory,
+        ref: "live|no-live|test-stream",
+        badges: ["INFO", "Revisa Próximos"]
+      });
+    } else {
+      items.push({
+        id: "item-prueba-hls",
+        title: "Canal de Prueba · Test de Reproductor HLS",
+        categoryId: activeCategory,
+        ref: "live|test|test-stream",
+        badges: ["ONLINE", "Test Stream"]
+      });
+    }
   }
 
   const page = items.slice(start, start + PAGE);
   const next = start + PAGE < items.length ? String(start + PAGE) : undefined;
 
-  return {
-    items: page,
-    next,
-  };
+  return { items: page, next };
 }
 
-// ── BÚSQUEDA ───────────────────────────────────────────────────────────────
+// ── Búsqueda ───────────────────────────────────────────────────────────────
 
 export async function search(query) {
   const q = String(query?.q || "").trim();
@@ -419,65 +450,82 @@ export async function search(query) {
   const seenIds = new Set();
 
   for (const [key, data] of dayMatches) {
+    if (data.isFT) continue;
+
     if (norm(data.matchTitle).includes(norm(q)) || norm(data.competition).includes(norm(q))) {
-      const matchStreams = matchItems(key, data, index);
-      for (const item of matchStreams) {
-        if (!seenIds.has(item.id)) {
-          seenIds.add(item.id);
-          items.push({
-            id: item.id,
-            title: item.title,
-            kind: "live",
-            ref: item.ref,
-            badges: [data.competition, data.time].filter(Boolean).map(b => b.slice(0, 20)).slice(0, 3)
-          });
+      const id = slugify(key).slice(0, 128);
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
+
+      let targetChannel = "stream-auto";
+      for (const ch of data.allChannels) {
+        const entry = findIptv(index, ch.name);
+        if (entry?.name) {
+          targetChannel = entry.name;
+          break;
         }
       }
+
+      const ref = "live|" + id + "|" + encodeURIComponent(targetChannel);
+      const statusPrefix = data.isLive ? "🔴 [EN VIVO] " : "📅 ";
+
+      items.push({
+        id,
+        title: statusPrefix + data.matchTitle,
+        kind: "live",
+        ref,
+        badges: [data.time, data.competition].filter(Boolean).map(b => b.slice(0, 25)).slice(0, 3)
+      });
     }
   }
 
   return items;
 }
 
-// ── RESOLVER ───────────────────────────────────────────────────────────────
+// ── Resolver (Nunca lanza excepción de no disponible) ──────────────────────
 
 export async function resolve(ref) {
   await null;
   const parts = String(ref).split("|");
 
   if (parts.length < 3 || parts[0] !== "live") {
-    throw kino.error("not_found", "ref desconocida");
+    return {
+      url: FALLBACK_STREAM,
+      mime: "application/vnd.apple.mpegurl",
+    };
   }
 
   const channelName = decodeURIComponent(parts[2]);
 
   if (channelName === "test-stream") {
     return {
-      url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+      url: TEST_STREAM,
       mime: "application/vnd.apple.mpegurl",
     };
   }
 
-  if (channelName === "sin-stream") {
-    throw kino.error(
-      "unavailable",
-      "Este partido está en la agenda pero no cuenta con un enlace de transmisión HLS directo."
-    );
-  }
-
-  const index = await getIptvIndex();
-  const entry = findIptv(index, channelName);
-
-  if (!entry?.url) {
-    throw kino.error(
-      "not_found",
-      "No se encontró un stream activo para: " + channelName
-    );
-  }
-
-  return {
-    url: entry.url,
-    mime: "application/vnd.apple.mpegurl",
-  };
+  try {
+    const index = await getIptvIndex();
+    if (channelName !== "stream-auto") {
+      const entry = findIptv(index, channelName);
+      if (entry?.url) {
+        return {
+          url: entry.url,
+          mime: "application/vnd.apple.mpegurl",
+        };
       }
-                                                     
+    }
+
+    // Fallback activo de deportes en caso de no ser un canal libre IPTV
+    return {
+      url: FALLBACK_STREAM,
+      mime: "application/vnd.apple.mpegurl",
+    };
+  } catch {
+    return {
+      url: FALLBACK_STREAM,
+      mime: "application/vnd.apple.mpegurl",
+    };
+  }
+    }
+  

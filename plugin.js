@@ -13,7 +13,7 @@ const SCHED_TTL = 5 * 60 * 1000;       // 5 min
 const REAL_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 
 // Servidores de transmisión HLS continua de alto rendimiento
-const PRIMARY_HLS_STREAM  = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
+const PRIMARY_HLS_STREAM  = "http://planettvweb.com:8091/live/orlan551122/88774/50497.m3u8";
 const SECONDARY_HLS_STREAM = "https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8";
 
 // ── Utilidades ─────────────────────────────────────────────────────────────
@@ -517,4 +517,5 @@ export async function resolve(ref) {
     };
   }
   }
-      
+
+                  

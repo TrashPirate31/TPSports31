@@ -1,16 +1,15 @@
 {
   "id": "streamed-sports31",
   "name": "StreamedSports31",
-  "version": "4.1.0",
+  "version": "5.0.0",
   "apiVersion": 3,
   "entry": "plugin.js",
-  "description": "Agenda deportiva y streams HLS de LiveSoccerTV e IPTV-org",
+  "description": "Partidos en vivo ahora con streams directos",
   "author": "TP31",
   "homepage": "https://github.com/TrashPirate31/TPSports31",
   "hosts": [
     "www.livesoccertv.com",
-    "iptv-org.github.io",
-    { "host": "planettvweb.com", "insecureHttp": true }
+    "raw.githubusercontent.com"
   ],
   "capabilities": ["search", "resolve", "channels"],
   "liveStreamHosts": "any",

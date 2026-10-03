@@ -1,7 +1,7 @@
 {
   "id": "streamed-sports31",
   "name": "StreamedSports31",
-  "version": "5.0.0",
+  "version": "5.1.1",
   "apiVersion": 3,
   "entry": "plugin.js",
   "description": "Partidos en vivo ahora con streams directos",

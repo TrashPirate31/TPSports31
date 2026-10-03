@@ -1,5 +1,5 @@
 /// <reference path="./sdk/kino.d.ts" />
-// StreamedSports31 v5.0.0
+// StreamedSports31 v5.1.1
 // Schedule : livesoccertv.com (solo partidos EN VIVO ahora)
 // Streams  : canales.m3u en el repo (streams directos)
 

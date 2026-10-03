@@ -1,5 +1,5 @@
 /// <reference path="./sdk/kino.d.ts" />
-// StreamedSports31 v5.1.1
+// StreamedSports31 v5.2.0
 // Schedule : livesoccertv.com (solo partidos EN VIVO ahora)
 // Streams  : canales.m3u en el repo (streams directos)
 
@@ -121,7 +121,7 @@ function findChannel(index, name) {
 function parseLSTV(html) {
   if (typeof html !== "string" || !html) return [];
   const matches = [];
-  const rowRe = /<tr[^>]+class="([^"]*match[_-]?row[^"]*)"[^>]*>([\s\S]*?)<\/tr>/gi;
+  const rowRe = /<tr[^>]+class="([^"]*matchrow[^"]*)"[^>]*>([\s\S]*?)<\/tr>/gi;
   let rowM;
 
   while ((rowM = rowRe.exec(html)) !== null) {
@@ -140,8 +140,11 @@ function parseLSTV(html) {
     if (!matchTitle) continue;
 
     // Solo partidos en vivo ahora
-    const trLive     = trClass.split(/\s+/).includes("live") || trClass.includes("match_live");
-    const spanLive   = /<span[^>]+class="[^"]*\blive\b[^"]*"/i.test(timeRaw);
+    // livesoccertv usa class="matchrow livematch" y data-timer en el <tr>
+    // y class="livecell live" / class="inprogress" en las celdas internas
+    const trLive     = trClass.includes("livematch") || trClass.includes("live");
+    const spanLive   = /<span[^>]+class="[^"]*live[^"]*"/i.test(timeRaw) ||
+                       /<span[^>]+class="[^"]*inprogress[^"]*"/i.test(row);
     const minuteLive = /^\d+(\+\d+)?['"]?$/.test(timeClean);
     const keyLive    = ["HT","LIVE","EN VIVO","1H","2H","MT","ET"].includes(timeClean.toUpperCase());
     if (!trLive && !spanLive && !minuteLive && !keyLive) continue;
@@ -181,7 +184,7 @@ async function fetchSchedule(url) {
         "Accept-Language": "es-MX,es;q=0.9,en;q=0.8",
       },
     });
-    if (!r && r.ok) return [];
+    if (!r || !r.ok) return [];
     return parseLSTV(r.text());
   } catch {
     return [];
@@ -338,7 +341,7 @@ export async function resolve(ref) {
   const index = await getIndex();
   const entry = findChannel(index, channelName);
 
-  if (!entry && entry.url) {
+  if (!entry || !entry.url) {
     throw kino.error("unavailable", "Canal no disponible: " + channelName);
   }
 
@@ -346,4 +349,5 @@ export async function resolve(ref) {
     url: entry.url,
     mime: "application/vnd.apple.mpegurl",
   };
-}
+        }
+    

@@ -1,14 +1,14 @@
 {
   "id": "streamed-sports31",
   "name": "StreamedSports31",
-  "version": "5.2.0",
+  "version": "6.0.0",
   "apiVersion": 3,
   "entry": "plugin.js",
-  "description": "Partidos en vivo ahora con streams directos",
+  "description": "Eventos deportivos en vivo con streams directos",
   "author": "TP31",
   "homepage": "https://github.com/TrashPirate31/TPSports31",
   "hosts": [
-    "www.livesoccertv.com",
+    "bintvjson.lovable.app",
     "raw.githubusercontent.com"
   ],
   "capabilities": ["search", "resolve", "channels"],

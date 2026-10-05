@@ -1,5 +1,5 @@
 /// <reference path="./sdk/kino.d.ts" />
-// StreamedSports31 v6.0.0
+// StreamedSports31 v6.1.0
 // Schedule : bintvjson.lovable.app (eventos en vivo con status:"live")
 // Streams  : canales.m3u del repo (primero) o grandemx.org via base64 (fallback)
 
@@ -243,13 +243,12 @@ export async function liveChannels({ categoryId, cursor }) {
       }
     }
 
-    // Si no hay canal propio, usar el stream de BinTV (grandemx.org)
+    // Si no hay canal propio, usar el embed de BinTV directamente
     if (!bestStreamUrl && streams.length > 0) {
       var bintUrl = streams[0].url || "";
-      var decoded = extractStreamUrl(bintUrl);
-      if (decoded && decoded.indexOf("http") === 0) {
+      if (bintUrl && bintUrl.indexOf("http") === 0) {
         bestChannelName = streams[0].name || "Stream";
-        bestStreamUrl = decoded;
+        bestStreamUrl = bintUrl; // URL del embed bintv-sources.pages.dev
       }
     }
 
@@ -308,9 +307,8 @@ export async function search(query) {
 
     var streams = event.streams || [];
     var bintUrl = streams.length > 0 ? (streams[0].url || "") : "";
-    var decoded = extractStreamUrl(bintUrl);
-    var ref = decoded && decoded.indexOf("http") === 0
-      ? "live|" + id + "|url|" + decoded
+    var ref = bintUrl && bintUrl.indexOf("http") === 0
+      ? "live|" + id + "|url|" + bintUrl
       : "live|" + id + "|sin-stream|";
 
     if (ref.length > 4096) ref = "live|" + id + "|sin-stream|";
@@ -350,9 +348,12 @@ export async function resolve(ref) {
     if (!value || value.indexOf("http") !== 0) {
       throw kino.error("not_found", "URL de stream inválida");
     }
+    // Si es un embed de bintv-sources, enviarlo como página web
+    // Si es un m3u8 propio (http:// de nuestros canales), enviarlo como HLS
+    var isEmbed = value.indexOf("bintv-sources.pages.dev") >= 0;
     return {
       url: value,
-      mime: "application/vnd.apple.mpegurl",
+      mime: isEmbed ? "text/html" : "application/vnd.apple.mpegurl",
     };
   }
 
@@ -384,5 +385,5 @@ export async function resolve(ref) {
   }
 
   throw kino.error("not_found", "Tipo de ref desconocido: " + type);
-    }
+        }
         

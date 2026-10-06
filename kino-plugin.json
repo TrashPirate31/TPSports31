@@ -1,16 +1,14 @@
 {
   "id": "streamed-sports31",
   "name": "StreamedSports31",
-  "version": "6.1.0",
+  "version": "7.0.0",
   "apiVersion": 3,
   "entry": "plugin.js",
-  "description": "Eventos deportivos en vivo con streams directos",
+  "description": "Deportes en vivo: NBA, NFL, UFC, MLB, NHL y más",
   "author": "TP31",
   "homepage": "https://github.com/TrashPirate31/TPSports31",
   "hosts": [
-    "bintvjson.lovable.app",
-    "raw.githubusercontent.com",
-    "bintv-sources.pages.dev"
+    "streamfree.top"
   ],
   "capabilities": ["search", "resolve", "channels"],
   "liveStreamHosts": "any",

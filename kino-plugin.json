@@ -1,16 +1,18 @@
 {
   "id": "streamed-sports31",
   "name": "StreamedSports31",
-  "version": "7.0.0",
-  "apiVersion": 3,
+  "version": "8.0.0",
+  "apiVersion": 6,
   "entry": "plugin.js",
-  "description": "Deportes en vivo: NBA, NFL, UFC, MLB, NHL y más",
+  "description": "Deportes en vivo: fútbol, NBA, NFL, UFC, MLB, F1 y más. Requiere Kino 0.9.50+",
   "author": "TP31",
   "homepage": "https://github.com/TrashPirate31/TPSports31",
   "hosts": [
-    "streamfree.top"
+    "daddylive.mov"
   ],
   "capabilities": ["search", "resolve", "channels"],
+  "browser": true,
+  "streamHosts": "any",
   "liveStreamHosts": "any",
   "color": "#1A6B3C",
   "icon": "icon.png"

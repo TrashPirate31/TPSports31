@@ -1,18 +1,15 @@
 {
   "id": "streamed-sports31",
   "name": "StreamedSports31",
-  "version": "9.0.0",
+  "version": "10.1.0",
   "apiVersion": 6,
   "entry": "plugin.js",
-  "description": "Deportes en vivo desde 5 fuentes: DaddyLive, StreamFree, BinTV, WatchFooty y DamiTV",
+  "description": "Deportes en vivo: DaddyLive + streamed.pk con browser oculto",
   "author": "TP31",
   "homepage": "https://github.com/TrashPirate31/TPSports31",
   "hosts": [
     "daddylive.mov",
-    "streamfree.top",
-    "bintvjson.lovable.app",
-    "api.watchfooty.st",
-    "ondemand.st"
+    "streamed.pk"
   ],
   "capabilities": ["search", "resolve", "channels"],
   "browser": true,

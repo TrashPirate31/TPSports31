@@ -1,65 +1,16 @@
 /// <reference path="./sdk/kino.d.ts" />
-// StreamedSports31 v9.0.0
-// Categorías = APIs: DaddyLive, StreamFree, BinTV, WatchFooty, DamiTV
-// Streams: kino.browser.capture en resolve()
-// Hora: México Central (UTC-6)
+// StreamedSports31 v10.1.0
+// Fuentes: DaddyLive + streamed.pk
+// Streams: kino.browser.capture, prueba cada link uno por uno, timeout máximo en el último
 
-const UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36";
+const API    = "https://daddylive.mov/api";
+const STREAMED = "https://streamed.pk/api";
+const UA     = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36";
+const MAX_MS = 25000; // timeout máximo permitido por Kino
+const MID_MS = 15000; // timeout para links intermedios
 
-// ── Fuentes ───────────────────────────────────────────────────────────────────
-var SOURCES = {
-  "daddylive": {
-    id: "daddylive",
-    title: "DaddyLive",
-    base: "https://daddylive.mov",
-  },
-  "streamfree": {
-    id: "streamfree",
-    title: "StreamFree",
-    base: "https://streamfree.top",
-  },
-  "bintv": {
-    id: "bintv",
-    title: "BinTV",
-    base: "https://bintvjson.lovable.app",
-  },
-  "watchfooty": {
-    id: "watchfooty",
-    title: "WatchFooty",
-    base: "https://api.watchfooty.st",
-  },
-  "damitv": {
-    id: "damitv",
-    title: "DamiTV",
-    base: "https://ondemand.st",
-  },
-};
+// ── Utilidades ────────────────────────────────────────────────────────────────
 
-// ── Hora México Central (UTC-6) ───────────────────────────────────────────────
-function toMXTime(timestamp) {
-  // timestamp en ms o segundos
-  var ms = timestamp > 9999999999 ? timestamp : timestamp * 1000;
-  var d = new Date(ms - 6 * 60 * 60 * 1000); // UTC-6
-  var h = d.getUTCHours();
-  var m = d.getUTCMinutes();
-  var ampm = h >= 12 ? "pm" : "am";
-  h = h % 12 || 12;
-  return h + ":" + (m < 10 ? "0" : "") + m + " " + ampm + " MX";
-}
-
-function isLive(status) {
-  if (!status) return false;
-  var s = String(status).toLowerCase();
-  return s === "live" || s === "in" || s === "inprogress" || s === "1";
-}
-
-function isUpcoming(status) {
-  if (!status) return false;
-  var s = String(status).toLowerCase();
-  return s === "upcoming" || s === "pre" || s === "scheduled" || s === "0";
-}
-
-// ── Slugify / safeId ──────────────────────────────────────────────────────────
 function slugify(s) {
   return String(s || "")
     .toLowerCase()
@@ -69,213 +20,109 @@ function slugify(s) {
     .slice(0, 100) || "item";
 }
 
-function safeId(src, raw) {
-  var s = src + "-" + slugify(String(raw || "")).slice(0, 80);
-  if (/^[A-Za-z0-9._~-]{1,128}$/.test(s)) return s;
+function safeId(raw) {
+  var s = "dl-" + slugify(String(raw || "")).slice(0, 80);
   return s.replace(/[^A-Za-z0-9._~-]/g, "-").slice(0, 128);
 }
 
-// ── Fetch helpers ─────────────────────────────────────────────────────────────
-async function getJSON(url) {
+// ── Fetch helper ──────────────────────────────────────────────────────────────
+
+async function apiGet(path) {
   await null;
   var r;
   try {
-    r = await kino.fetch(url, {
+    r = await kino.fetch(API + path, {
       headers: { "User-Agent": UA, "Accept": "application/json" }
     });
   } catch (e) {
-    throw kino.error("unavailable", "Sin conexión: " + url.split("/")[2]);
+    throw kino.error("unavailable", "Sin conexión con DaddyLive");
   }
   if (r.status === 429) throw kino.error("rate_limited");
-  if (!r.ok) throw kino.error("unavailable", "Error " + r.status);
+  if (!r.ok) throw kino.error("unavailable", "DaddyLive respondió " + r.status);
   return r.json();
 }
 
-// ── Normalizar eventos de cada API ────────────────────────────────────────────
-// Devuelve: [{ id, title, embedUrls, status, time, sport }]
+// ── Traducción de categorías ──────────────────────────────────────────────────
 
-async function fetchDaddyLive() {
-  await null;
-  var data = await getJSON("https://daddylive.mov/api/events");
-  var cats = data.categories || {};
-  var out = [];
-  for (var cat in cats) {
-    if (!Object.prototype.hasOwnProperty.call(cats, cat)) continue;
-    var events = cats[cat];
-    if (!Array.isArray(events)) continue;
-    for (var i = 0; i < events.length; i++) {
-      var ev = events[i];
-      if (!ev.event || !ev.channels || !ev.channels.length) continue;
-      var urls = ev.channels.map(function(c) { return c.url; }).filter(Boolean);
-      if (!urls.length) continue;
-      out.push({
-        id: safeId("dl", ev.event + (ev.time || "")),
-        title: String(ev.event),
-        embedUrls: urls,
-        status: "live",
-        time: ev.time || "",
-        sport: cat,
-      });
-    }
-  }
-  return out;
-}
-
-async function fetchStreamFree() {
-  await null;
-  var data = await getJSON("https://streamfree.top/api/v1/streams");
-  var streams = data.streams || [];
-  var out = [];
-  for (var i = 0; i < streams.length; i++) {
-    var s = streams[i];
-    if (!s.name || !s.sources || !s.sources.length) continue;
-    out.push({
-      id: safeId("sf", s.id || s.stream_key || s.name),
-      title: String(s.name),
-      embedUrls: s.sources.filter(Boolean),
-      status: "live",
-      time: "",
-      sport: s.category || "",
-    });
-  }
-  return out;
-}
-
-async function fetchBinTV() {
-  await null;
-  var data = await getJSON("https://bintvjson.lovable.app/api/public/bintvjson");
-  var live = data["Live Events"] || [];
-  var upcoming = data["Upcoming Events"] || [];
-  var out = [];
-
-  for (var i = 0; i < live.length; i++) {
-    var ev = live[i];
-    if (!ev.name) continue;
-    var urls = (ev.streams || []).map(function(s) { return s.url; }).filter(Boolean);
-    out.push({
-      id: safeId("bt", ev.id || ev.name),
-      title: String(ev.name),
-      embedUrls: urls,
-      status: "live",
-      time: "",
-      sport: ev.category || "",
-      poster: ev.poster || "",
-    });
-  }
-
-  for (var j = 0; j < upcoming.length; j++) {
-    var uev = upcoming[j];
-    if (!uev.name) continue;
-    var utime = uev.starts_at ? toMXTime(uev.starts_at) : "";
-    out.push({
-      id: safeId("bt", uev.id || uev.name),
-      title: String(uev.name),
-      embedUrls: [],
-      status: "upcoming",
-      time: utime,
-      sport: uev.category || "",
-      poster: uev.poster || "",
-    });
-  }
-  return out;
-}
-
-async function fetchWatchFooty() {
-  await null;
-  var live = [];
-  var upcoming = [];
-  try {
-    var liveData = await getJSON("https://api.watchfooty.st/api/v1/matches/live");
-    live = Array.isArray(liveData) ? liveData : (liveData.matches || []);
-  } catch (e) { /* continuar */ }
-  try {
-    var upData = await getJSON("https://api.watchfooty.st/api/v1/matches/upcoming");
-    upcoming = Array.isArray(upData) ? upData : (upData.matches || []);
-  } catch (e) { /* continuar */ }
-
-  var out = [];
-  for (var i = 0; i < live.length; i++) {
-    var m = live[i];
-    if (!m.title && !m.name) continue;
-    var title = m.title || m.name;
-    var urls = (m.streams || []).map(function(s) { return s.url || s.embedUrl || ""; }).filter(Boolean);
-    out.push({
-      id: safeId("wf", m.matchId || m.id || title),
-      title: String(title),
-      embedUrls: urls,
-      status: "live",
-      time: m.currentMinute || "",
-      sport: m.sport || m.league || "",
-      poster: m.poster || "",
-    });
-  }
-  for (var j = 0; j < upcoming.length; j++) {
-    var um = upcoming[j];
-    if (!um.title && !um.name) continue;
-    var utitle = um.title || um.name;
-    var utime = um.timestamp ? toMXTime(um.timestamp) : (um.time || "");
-    out.push({
-      id: safeId("wf", um.matchId || um.id || utitle),
-      title: String(utitle),
-      embedUrls: [],
-      status: "upcoming",
-      time: utime,
-      sport: um.sport || um.league || "",
-      poster: um.poster || "",
-    });
-  }
-  return out;
-}
-
-async function fetchDamiTV() {
-  await null;
-  var data = await getJSON("https://ondemand.st/papi/api/streams");
-  var streams = data.streams || [];
-  var out = [];
-  for (var i = 0; i < streams.length; i++) {
-    var cat = streams[i];
-    var events = cat.streams || [];
-    for (var j = 0; j < events.length; j++) {
-      var ev = events[j];
-      if (!ev.name) continue;
-      var urls = [];
-      if (ev.embed) urls.push(ev.embed);
-      var st = ev.status === 1 || ev.status === "live" ? "live" :
-               ev.status === 0 || ev.status === "upcoming" ? "upcoming" : "live";
-      var utime = (st === "upcoming" && ev.starts_at) ? toMXTime(ev.starts_at) : (ev.time || "");
-      out.push({
-        id: safeId("dm", ev.id || ev.name),
-        title: String(ev.name),
-        embedUrls: urls,
-        status: st,
-        time: utime,
-        sport: cat.category || "",
-        poster: ev.poster || "",
-      });
-    }
-  }
-  return out;
-}
-
-var FETCHERS = {
-  "daddylive": fetchDaddyLive,
-  "streamfree": fetchStreamFree,
-  "bintv":      fetchBinTV,
-  "watchfooty": fetchWatchFooty,
-  "damitv":     fetchDamiTV,
+var CAT_ES = {
+  "Football":          "⚽ Fútbol",
+  "Basketball":        "🏀 Baloncesto",
+  "Hockey":            "🏒 Hockey",
+  "Boxing":            "🥊 Boxeo",
+  "MMA / UFC":         "🥋 MMA / UFC",
+  "Baseball":          "⚾ Béisbol",
+  "American Football": "🏈 Fútbol Americano",
+  "Racing":            "🏎 Automovilismo",
+  "Tennis":            "🎾 Tenis",
+  "Cricket":           "🏏 Cricket",
+  "Rugby":             "🏉 Rugby",
+  "Golf":              "⛳ Golf",
+  "Darts":             "🎯 Dardos",
+  "Snooker":           "🎱 Snooker",
 };
+
+function catTitle(cat) {
+  return CAT_ES[cat] || ("🏟 " + cat);
+}
+
+// ── streamed.pk ───────────────────────────────────────────────────────────────
+
+async function fetchStreamedLive() {
+  await null;
+  var r;
+  try {
+    r = await kino.fetch(STREAMED + "/matches/live", {
+      headers: { "User-Agent": UA, "Accept": "application/json" }
+    });
+  } catch (e) { return []; }
+  if (!r.ok) return [];
+  var matches = r.json();
+  if (!Array.isArray(matches)) return [];
+  var out = [];
+  for (var i = 0; i < matches.length; i++) {
+    var m = matches[i];
+    if (!m.id || !m.sources || !m.sources.length) continue;
+    var home = m.teams && m.teams.home && m.teams.home.name;
+    var away = m.teams && m.teams.away && m.teams.away.name;
+    var title = (home && away) ? (home + " vs " + away) : (m.title || "Partido");
+    var urls = m.sources.map(function(s) {
+      return "https://embedme.top/embed/" + s.source + "/" + s.id + "/1";
+    });
+    if (!urls.length) continue;
+    var badge = m.teams && m.teams.home && m.teams.home.badge;
+    out.push({
+      id: "sk-" + slugify(String(m.id)).slice(0, 80),
+      title: title,
+      embedUrls: urls,
+      sport: m.category || "",
+      poster: badge ? ("https://streamed.pk/api/images/badge/" + badge + ".webp") : undefined,
+    });
+  }
+  return out;
+}
 
 // ── liveCategories ────────────────────────────────────────────────────────────
 
 export async function liveCategories() {
   await null;
-  return [
-    { id: "daddylive", title: "🔴 DaddyLive" },
-    { id: "streamfree", title: "🔴 StreamFree" },
-    { id: "bintv",      title: "🔴 BinTV" },
-    { id: "watchfooty", title: "🔴 WatchFooty" },
-    { id: "damitv",     title: "🔴 DamiTV" },
-  ];
+  var data;
+  try {
+    data = await apiGet("/events");
+  } catch (e) {
+    return [{ id: "all", title: "🔴 En Vivo" }];
+  }
+  var cats = new Map();
+  cats.set("all", { id: "all", title: "🔴 Todos en Vivo" });
+  cats.set("streamed", { id: "streamed", title: "🔴 streamed.pk" });
+  var categories = data.categories || {};
+  for (var cat in categories) {
+    if (!Object.prototype.hasOwnProperty.call(categories, cat)) continue;
+    var id = slugify(cat);
+    if (!cats.has(id)) {
+      cats.set(id, { id: id, title: catTitle(cat) });
+    }
+  }
+  return Array.from(cats.values()).slice(0, 200);
 }
 
 // ── liveChannels ──────────────────────────────────────────────────────────────
@@ -283,31 +130,59 @@ export async function liveCategories() {
 export async function liveChannels({ categoryId, cursor }) {
   await null;
 
-  var fetcher = FETCHERS[categoryId];
-  if (!fetcher) {
-    return { items: [{ id: "unknown-src", title: "Fuente desconocida", categoryId: categoryId, ref: "live|x|sin-stream|" }] };
+  // ── streamed.pk ──
+  if (categoryId === "streamed") {
+    var skList;
+    try { skList = await fetchStreamedLive(); } catch (e) { skList = []; }
+    if (!skList.length) {
+      return { items: [{ id: "sin-sk", title: "No hay partidos en vivo en streamed.pk", categoryId: "streamed", ref: "live|x|sin-stream|" }] };
+    }
+    var skItems = [];
+    var skSeen = new Set();
+    for (var si = 0; si < skList.length; si++) {
+      var sev = skList[si];
+      if (skSeen.has(sev.id)) continue;
+      skSeen.add(sev.id);
+      var sref = "live|" + sev.id + "|multi|" + encodeURIComponent(sev.embedUrls.join("^^"));
+      if (sref.length > 4000) sref = "live|" + sev.id + "|single|" + encodeURIComponent(sev.embedUrls[0]);
+      skItems.push({ id: sev.id, title: "🔴 " + sev.title, categoryId: "streamed", ref: sref, poster: sev.poster, badges: [sev.sport].filter(Boolean).map(function(b){ return String(b).slice(0,25); }) });
+    }
+    return { items: skItems };
   }
 
-  var events;
+  var data;
   try {
-    events = await fetcher();
+    data = await apiGet("/events");
   } catch (e) {
-    kino.log("Error fetching", categoryId, ":", e.message || e.code);
     return {
       items: [{
-        id: "error-" + categoryId,
-        title: "No se pudo conectar con " + (SOURCES[categoryId] && SOURCES[categoryId].title || categoryId),
+        id: "error-dl",
+        title: "No se pudo conectar con DaddyLive",
         categoryId: categoryId,
         ref: "live|x|sin-stream|",
       }]
     };
   }
 
-  if (!events.length) {
+  var categories = data.categories || {};
+  var allEvents = [];
+
+  for (var cat in categories) {
+    if (!Object.prototype.hasOwnProperty.call(categories, cat)) continue;
+    var catId = slugify(cat);
+    if (categoryId !== "all" && catId !== categoryId) continue;
+    var events = categories[cat];
+    if (!Array.isArray(events)) continue;
+    for (var i = 0; i < events.length; i++) {
+      allEvents.push({ ev: events[i], cat: cat });
+    }
+  }
+
+  if (!allEvents.length) {
     return {
       items: [{
-        id: "sin-eventos-" + categoryId,
-        title: "No hay eventos disponibles en este momento",
+        id: "sin-eventos-" + slugify(categoryId),
+        title: "No hay eventos en vivo en este momento",
         categoryId: categoryId,
         ref: "live|x|sin-stream|",
       }]
@@ -317,43 +192,33 @@ export async function liveChannels({ categoryId, cursor }) {
   var items = [];
   var seenIds = new Set();
 
-  for (var i = 0; i < events.length; i++) {
-    var ev = events[i];
-    var id = ev.id;
-    if (seenIds.has(id)) { id = id + "-" + i; }
+  for (var k = 0; k < allEvents.length; k++) {
+    var entry = allEvents[k];
+    var ev = entry.ev;
+    if (!ev.event || !ev.channels || !ev.channels.length) continue;
+
+    var id = safeId(ev.event + "-" + (ev.time || "").replace(/[^0-9]/g, ""));
+    if (seenIds.has(id)) continue;
     seenIds.add(id);
 
-    var live = ev.status === "live";
-    var upcoming = ev.status === "upcoming";
+    var urls = ev.channels.map(function(c) { return c.url; }).filter(Boolean);
+    if (!urls.length) continue;
 
-    // Prefijo e icono
-    var prefix = live ? "🔴 " : "⏳ ";
-    var title = prefix + ev.title;
-
-    // Badge: hora MX para próximos, minuto para en vivo
-    var timeBadge = ev.time ? String(ev.time).slice(0, 25) : (live ? "En vivo" : "Próximo");
-    var sportBadge = ev.sport ? String(ev.sport).slice(0, 25) : "";
-    var badges = [timeBadge, sportBadge].filter(Boolean);
-
-    // Ref
-    var ref;
-    if (!ev.embedUrls.length) {
-      ref = "live|" + id + "|sin-stream|";
-    } else {
-      var refData = ev.embedUrls.join("^^");
-      ref = "live|" + id + "|multi|" + encodeURIComponent(refData);
-      if (ref.length > 4000) {
-        ref = "live|" + id + "|single|" + encodeURIComponent(ev.embedUrls[0]);
-      }
+    var refData = urls.join("^^");
+    var ref = "live|" + id + "|multi|" + encodeURIComponent(refData);
+    if (ref.length > 4000) {
+      ref = "live|" + id + "|single|" + encodeURIComponent(urls[0]);
     }
 
     items.push({
       id: id,
-      title: title.slice(0, 200),
+      title: "🔴 " + String(ev.event).slice(0, 180),
       categoryId: categoryId,
       ref: ref,
-      poster: ev.poster || undefined,
-      badges: badges,
+      badges: [
+        ev.time ? String(ev.time).slice(0, 25) : "En vivo",
+        entry.cat ? String(entry.cat).slice(0, 25) : "",
+      ].filter(Boolean),
     });
   }
 
@@ -367,55 +232,50 @@ export async function search(query) {
   var q = String((query && query.q) || "").trim().toLowerCase();
   if (!q) return [];
 
-  // Buscar en todas las APIs en paralelo
-  var results = await Promise.all(
-    Object.keys(FETCHERS).map(function(srcId) {
-      return FETCHERS[srcId]().catch(function() { return []; });
-    })
-  );
+  var data;
+  try {
+    data = await apiGet("/events");
+  } catch (e) {
+    return [];
+  }
 
+  var categories = data.categories || {};
   var items = [];
   var seenIds = new Set();
-  var srcIds = Object.keys(FETCHERS);
 
-  for (var s = 0; s < results.length; s++) {
-    var events = results[s];
-    var srcId = srcIds[s];
+  for (var cat in categories) {
+    if (!Object.prototype.hasOwnProperty.call(categories, cat)) continue;
+    var events = categories[cat];
+    if (!Array.isArray(events)) continue;
     for (var i = 0; i < events.length; i++) {
       var ev = events[i];
-      if (!ev.title || ev.title.toLowerCase().indexOf(q) < 0) continue;
-      var id = ev.id;
+      if (!ev.event) continue;
+      if (ev.event.toLowerCase().indexOf(q) < 0 && cat.toLowerCase().indexOf(q) < 0) continue;
+      if (!ev.channels || !ev.channels.length) continue;
+
+      var id = safeId(ev.event + "-" + (ev.time || "").replace(/[^0-9]/g, ""));
       if (seenIds.has(id)) continue;
       seenIds.add(id);
 
-      var prefix = ev.status === "live" ? "🔴 " : "⏳ ";
-      var ref;
-      if (!ev.embedUrls.length) {
-        ref = "live|" + id + "|sin-stream|";
-      } else {
-        var refData = ev.embedUrls.join("^^");
-        ref = "live|" + id + "|multi|" + encodeURIComponent(refData);
-        if (ref.length > 4000) ref = "live|" + id + "|single|" + encodeURIComponent(ev.embedUrls[0]);
-      }
+      var urls = ev.channels.map(function(c) { return c.url; }).filter(Boolean);
+      var refData = urls.join("^^");
+      var ref = "live|" + id + "|multi|" + encodeURIComponent(refData);
+      if (ref.length > 4000) ref = "live|" + id + "|single|" + encodeURIComponent(urls[0]);
 
       items.push({
         id: id,
-        title: prefix + ev.title,
+        title: "🔴 " + String(ev.event).slice(0, 180),
         kind: "live",
         ref: ref,
-        poster: ev.poster || undefined,
-        badges: [ev.time || (ev.status === "live" ? "En vivo" : "Próximo"), srcId].filter(Boolean).map(function(b) { return String(b).slice(0, 25); }),
+        badges: [ev.time || "En vivo", cat].filter(Boolean).map(function(b) { return String(b).slice(0, 25); }),
       });
-
-      if (items.length >= 60) break;
     }
-    if (items.length >= 60) break;
   }
 
-  return items;
+  return items.slice(0, 50);
 }
 
-// ── resolve ───────────────────────────────────────────────────────────────────
+// ── resolve: prueba cada link uno por uno, timeout máximo en el último ────────
 
 export async function resolve(ref) {
   await null;
@@ -429,7 +289,7 @@ export async function resolve(ref) {
   var value = parts.slice(3).join("|");
 
   if (type === "sin-stream") {
-    throw kino.error("unavailable", "Este evento no tiene stream disponible todavía");
+    throw kino.error("unavailable", "Este evento no tiene stream disponible");
   }
 
   var embedUrls = [];
@@ -441,46 +301,59 @@ export async function resolve(ref) {
   }
 
   if (!embedUrls.length) {
-    throw kino.error("not_found", "No hay streams disponibles para este evento");
+    throw kino.error("not_found", "No hay streams para este evento");
   }
 
   if (typeof kino.browser === "undefined" || typeof kino.browser.capture !== "function") {
     throw kino.error("unavailable", "Este plugin necesita Kino 0.9.50 o más reciente");
   }
 
+  // Probar cada link uno por uno
+  // Los primeros usan MID_MS para no gastar todo el tiempo en uno solo
+  // El último usa MAX_MS para darle la mejor oportunidad
   var lastError = null;
-  for (var i = 0; i < Math.min(embedUrls.length, 3); i++) {
+  var total = Math.min(embedUrls.length, 5); // máximo 5 links (el tiempo total de resolve es 75s)
+
+  for (var i = 0; i < total; i++) {
     var embedUrl = embedUrls[i];
     if (!embedUrl || embedUrl.indexOf("http") !== 0) continue;
 
+    var isLast = (i === total - 1);
+    var timeout = isLast ? MAX_MS : MID_MS;
+
     try {
-      kino.log("Capturando:", embedUrl);
+      kino.log("Link " + (i + 1) + "/" + total + " (" + timeout + "ms):", embedUrl);
+
       var page = await kino.browser.capture(embedUrl, {
-        timeoutMs: 20000,
-        headers: { "Referer": embedUrl.split("/").slice(0, 3).join("/") + "/" },
+        timeoutMs: timeout,
+        headers: { "Referer": "https://daddylive.mov/" },
       });
 
       if (!page.media || !page.media.length) {
-        kino.log("Sin media en:", embedUrl);
+        kino.log("Sin media en link", i + 1);
         continue;
       }
 
       var main = page.media[0];
       var alts = [];
 
-      // Otras calidades de esta misma página
+      // Otras calidades de esta página
       for (var j = 1; j < Math.min(page.media.length, 4); j++) {
-        alts.push({ url: page.media[j].url, headers: page.media[j].headers });
+        alts.push({
+          url: page.media[j].url,
+          headers: page.media[j].headers,
+        });
       }
 
-      // Otros links del evento como lazy copies
-      for (var k = i + 1; k < Math.min(embedUrls.length, 6); k++) {
+      // Links restantes como lazy copies
+      for (var k = i + 1; k < Math.min(embedUrls.length, 8); k++) {
         alts.push({
           label: "Link " + (k + 1),
           ref: "live|" + parts[1] + "|single|" + encodeURIComponent(embedUrls[k]),
         });
       }
 
+      kino.log("OK en link", i + 1);
       return {
         url: main.url,
         headers: main.headers,
@@ -490,14 +363,21 @@ export async function resolve(ref) {
       };
 
     } catch (e) {
-      kino.log("Error en link", i + 1, ":", e.code || e.message);
+      kino.log("Link", i + 1, "falló:", e.code || e.message);
       lastError = e;
-      if (e.code === "busy") throw kino.error("unavailable", "Otro stream está cargando, intenta en un momento");
-      if (e.code === "browser_unavailable") throw kino.error("unavailable", "Este dispositivo no soporta el reproductor oculto");
+      if (e.code === "busy") {
+        throw kino.error("unavailable", "Otro stream está cargando, espera un momento e intenta de nuevo");
+      }
+      if (e.code === "browser_unavailable") {
+        throw kino.error("unavailable", "Este dispositivo no soporta el reproductor oculto");
+      }
+      // timeout o blocked: pasar al siguiente link
       continue;
     }
   }
 
+  // Todos fallaron
   if (lastError && lastError.kinoCode) throw lastError;
-  throw kino.error("unavailable", "Ningún link respondió. Intenta más tarde");
-}
+  throw kino.error("unavailable", "Ningún link respondió. El evento puede haber terminado");
+      }
+                               
